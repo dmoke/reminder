@@ -22,13 +22,13 @@
   "build": {
     "appId": "com.reminder.app",
     "productName": "Reminders",
-    "icon": "app/assets/icon.png",
+    "icon": "app/assets/icon.ico",
     "directories": {
       "output": "dist"
     },
     "win": {
       "target": "nsis",
-      "icon": "app/assets/icon.png",
+      "icon": "app/assets/icon.ico",
       "signAndEditExecutable": false
     }
   }

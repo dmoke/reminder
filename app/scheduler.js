@@ -36,7 +36,7 @@ class Scheduler {
   triggerReminder(reminder) {
     this.pending.add(reminder.id);
     let handled = false;
-    const iconPath = path.join(__dirname, "assets", "icon.png");
+    const iconPath = path.join(__dirname, "assets", "icon.ico");
     const notification = new Notification({
       title: "Reminder",
       body: reminder.text,

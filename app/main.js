@@ -17,7 +17,7 @@ const Storage = require("./storage");
 const Scheduler = require("./scheduler");
 const { createTray } = require("./tray");
 
-const appIcon = path.join(__dirname, "assets", "icon.png");
+const appIcon = path.join(__dirname, "assets", "icon.ico");
 app.setAppUserModelId("com.reminder.app");
 console.log("main: starting");
 let tray = null;
@@ -57,7 +57,9 @@ function openMainWindow() {
     },
   });
   mainWindow.loadFile(path.join(__dirname, "..", "ui", "index.html"));
-  mainWindow.webContents.openDevTools({ mode: "detach" });
+  if (!app.isPackaged) {
+    mainWindow.webContents.openDevTools({ mode: "detach" });
+  }
   mainWindow.on("closed", () => (mainWindow = null));
 }
 
@@ -78,7 +80,9 @@ function openAddWindow() {
     },
   });
   addWindow.loadFile(path.join(__dirname, "..", "ui", "add.html"));
-  addWindow.webContents.openDevTools({ mode: "detach" });
+  if (!app.isPackaged) {
+    addWindow.webContents.openDevTools({ mode: "detach" });
+  }
   addWindow.once("ready-to-show", () => {
     addWindow.show();
   });

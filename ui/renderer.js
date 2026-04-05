@@ -492,6 +492,20 @@ function updateAddModalTranslations() {
 
   const submitBtn = document.querySelector(".primary-btn");
   if (submitBtn) submitBtn.textContent = t("add-modal-save-btn");
+
+  if (syncNowBtn) {
+    syncNowBtn.addEventListener("click", () => {
+      const now = new Date();
+
+      yearInput.value = now.getFullYear();
+      monthInput.value = String(now.getMonth() + 1).padStart(2, "0");
+      dayInput.value = String(now.getDate()).padStart(2, "0");
+      hourInput.value = String(now.getHours()).padStart(2, "0");
+      minuteInput.value = String(now.getMinutes()).padStart(2, "0");
+
+      updateDateDisplay();
+    });
+  }
 }
 
 async function loadAll() {
@@ -928,18 +942,4 @@ if (
 
 if (document.getElementById("addForm")) {
   updateAddModalTranslations();
-}
-
-if (syncNowBtn) {
-  syncNowBtn.addEventListener("click", () => {
-    const now = new Date();
-
-    yearInput.value = now.getFullYear();
-    monthInput.value = String(now.getMonth() + 1).padStart(2, "0");
-    dayInput.value = String(now.getDate()).padStart(2, "0");
-    hourInput.value = String(now.getHours()).padStart(2, "0");
-    minuteInput.value = String(now.getMinutes()).padStart(2, "0");
-
-    updateDateDisplay();
-  });
 }

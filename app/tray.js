@@ -3,7 +3,7 @@ const path = require("path");
 
 function createTray(openMainWindow) {
   let icon;
-  const iconPath = path.join(__dirname, "assets", "icon.png");
+  const iconPath = path.join(__dirname, "assets", "icon.ico");
   try {
     const image = nativeImage.createFromPath(iconPath);
     icon = image.isEmpty()
