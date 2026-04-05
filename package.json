@@ -1,0 +1,35 @@
+{
+  "name": "reminder",
+  "version": "1.0.0",
+  "description": "Windows tray-based reminders app",
+  "main": "app/main.js",
+  "scripts": {
+    "start": "electron . --enable-logging",
+    "build": "electron-builder",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "uuid": "^13.0.0"
+  },
+  "devDependencies": {
+    "electron-builder": "^26.8.1",
+    "electron": "^41.1.1"
+  },
+  "build": {
+    "appId": "com.reminder.app",
+    "productName": "Reminders",
+    "icon": "app/assets/icon.png",
+    "directories": {
+      "output": "dist"
+    },
+    "win": {
+      "target": "nsis",
+      "icon": "app/assets/icon.png",
+      "signAndEditExecutable": false
+    }
+  }
+}

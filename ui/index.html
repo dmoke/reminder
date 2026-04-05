@@ -1,0 +1,128 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <title>Reminders</title>
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline';"
+    />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="page-shell">
+      <header class="app-header">
+        <div>
+          <p class="eyebrow">Your reminders</p>
+          <h1>Reminders</h1>
+        </div>
+        <button id="addBtn" class="primary-btn">+ Add Reminder</button>
+      </header>
+
+      <section class="status-grid">
+        <div class="status-card">
+          <span class="status-label">Upcoming</span>
+          <strong id="upcomingCount">0</strong>
+        </div>
+        <div class="status-card">
+          <span class="status-label">Overdue</span>
+          <strong id="overdueCount">0</strong>
+        </div>
+        <div class="status-card">
+          <span class="status-label">Completed</span>
+          <strong id="completedCount">0</strong>
+        </div>
+      </section>
+
+      <nav class="view-nav">
+        <button class="view-button active" data-target="activePanel">
+          Upcoming
+        </button>
+        <button class="view-button" data-target="historyPanel">
+          Completed
+        </button>
+        <button class="view-button" data-target="settingsPanel">
+          Settings
+        </button>
+      </nav>
+
+      <section class="panel" id="activePanel">
+        <div class="panel-header">
+          <h2>Planned reminders</h2>
+          <p>Manage your upcoming tasks and reschedule quickly.</p>
+        </div>
+        <input
+          type="text"
+          id="activeSearch"
+          class="search-input"
+          placeholder="Search reminders..."
+        />
+        <div id="activeList" class="list-grid"></div>
+      </section>
+
+      <section class="panel hidden" id="historyPanel">
+        <div class="panel-header">
+          <h2>Completed reminders</h2>
+          <p>Archived reminders are stored separately for performance.</p>
+        </div>
+        <div class="delete-history-section">
+          <h3>Delete history</h3>
+          <div class="delete-controls">
+            <select id="deleteFilter" class="delete-filter">
+              <option value="lastHour">Last hour</option>
+              <option value="today">Today</option>
+              <option value="lastWeek">Last 7 days</option>
+              <option value="allTime">All time</option>
+            </select>
+            <button id="deleteHistoryBtn" class="delete-btn">
+              Delete selected
+            </button>
+          </div>
+          <div id="deleteConfirm" class="delete-confirm hidden">
+            <p>Are you sure? This action cannot be undone.</p>
+            <button id="confirmDelete" class="delete-confirm-btn">
+              Confirm delete
+            </button>
+            <button id="cancelDelete" class="secondary-btn">Cancel</button>
+          </div>
+        </div>
+        <input
+          type="text"
+          id="historySearch"
+          class="search-input"
+          placeholder="Search completed..."
+        />
+        <div id="historyList" class="list-grid"></div>
+      </section>
+
+      <section class="panel hidden" id="settingsPanel">
+        <div class="panel-header">
+          <h2>Settings</h2>
+          <p>Control where reminders are stored and keep the folder visible.</p>
+        </div>
+        <div class="storage-card storage-card--panel">
+          <p>Data folder:</p>
+          <div class="storage-row">
+            <span id="dataPath">Loading...</span>
+            <div>
+              <button id="changePathBtn" class="secondary-btn">Change</button>
+              <button id="openPathBtn" class="secondary-btn">Open</button>
+            </div>
+          </div>
+        </div>
+        <div class="language-card storage-card--panel">
+          <p>Language:</p>
+          <div class="language-buttons">
+            <button id="langEn" class="lang-btn active" data-lang="en">
+              English
+            </button>
+            <button id="langUk" class="lang-btn" data-lang="uk">
+              Українська
+            </button>
+          </div>
+        </div>
+      </section>
+    </div>
+    <script src="renderer.js"></script>
+  </body>
+</html>

@@ -1,0 +1,136 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <title>Add Reminder</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="page-shell add-shell">
+      <header class="app-header">
+        <div>
+          <p class="eyebrow">New reminder</p>
+          <h1>Add reminder</h1>
+        </div>
+      </header>
+
+      <section class="form-card">
+        <form id="addForm">
+          <label for="text">What do you want to remember?</label>
+          <input type="text" id="text" placeholder="Reminder text" required />
+
+          <label>When should it alert?</label>
+          <div class="datetime-wrapper">
+            <div class="date-time-grid">
+              <div class="datetime-field">
+                <label class="datetime-label">Year</label>
+                <div class="datetime-input-group">
+                  <input
+                    type="text"
+                    id="yearInput"
+                    placeholder="YYYY"
+                    class="datetime-input"
+                    required
+                  />
+                  <button
+                    type="button"
+                    class="datetime-dropdown-btn"
+                    id="yearDropdownBtn"
+                  >
+                    ▼
+                  </button>
+                </div>
+                <div class="datetime-dropdown hidden" id="yearDropdown"></div>
+              </div>
+              <div class="datetime-field">
+                <label class="datetime-label">Month</label>
+                <div class="datetime-input-group">
+                  <input
+                    type="text"
+                    id="monthInput"
+                    placeholder="MM"
+                    class="datetime-input"
+                    required
+                  />
+                  <button
+                    type="button"
+                    class="datetime-dropdown-btn"
+                    id="monthDropdownBtn"
+                  >
+                    ▼
+                  </button>
+                </div>
+                <div class="datetime-dropdown hidden" id="monthDropdown"></div>
+                <span id="monthOfYear" class="datetime-hint"></span>
+              </div>
+              <div class="datetime-field">
+                <label class="datetime-label">Day</label>
+                <div class="datetime-input-group">
+                  <input
+                    type="text"
+                    id="dayInput"
+                    placeholder="DD"
+                    class="datetime-input"
+                    required
+                  />
+                  <button
+                    type="button"
+                    class="datetime-dropdown-btn"
+                    id="dayDropdownBtn"
+                  >
+                    ▼
+                  </button>
+                </div>
+                <div class="datetime-dropdown hidden" id="dayDropdown"></div>
+                <span id="dayOfWeek" class="datetime-hint"></span>
+              </div>
+              <div class="datetime-field">
+                <label class="datetime-label">Hour</label>
+                <div class="datetime-input-group">
+                  <input
+                    type="text"
+                    id="hourInput"
+                    placeholder="HH"
+                    class="datetime-input"
+                    required
+                  />
+                  <button
+                    type="button"
+                    class="datetime-dropdown-btn"
+                    id="hourDropdownBtn"
+                  >
+                    ▼
+                  </button>
+                </div>
+                <div class="datetime-dropdown hidden" id="hourDropdown"></div>
+              </div>
+              <div class="datetime-field">
+                <label class="datetime-label">Minute</label>
+                <div class="datetime-input-group">
+                  <input
+                    type="text"
+                    id="minuteInput"
+                    placeholder="MM"
+                    class="datetime-input"
+                    required
+                  />
+                  <button
+                    type="button"
+                    class="datetime-dropdown-btn"
+                    id="minuteDropdownBtn"
+                  >
+                    ▼
+                  </button>
+                </div>
+                <div class="datetime-dropdown hidden" id="minuteDropdown"></div>
+              </div>
+            </div>
+          </div>
+
+          <button type="submit" class="primary-btn">Save reminder</button>
+        </form>
+      </section>
+    </div>
+    <script src="renderer.js"></script>
+  </body>
+</html>
