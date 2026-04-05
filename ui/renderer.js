@@ -218,7 +218,8 @@ const translations = {
     "panel-upcoming-desc": "Manage your upcoming tasks and reschedule quickly.",
     "search-active": "Search reminders...",
     "panel-history-title": "Completed reminders",
-    "panel-history-desc": "Archived reminders are stored separately for performance.",
+    "panel-history-desc":
+      "Archived reminders are stored separately for performance.",
     "search-history": "Search completed...",
     "delete-history-title": "Delete history",
     "delete-btn": "Delete selected",
@@ -230,7 +231,8 @@ const translations = {
     "filter-last-week": "Last 7 days",
     "filter-all-time": "All time",
     "panel-settings-title": "Settings",
-    "panel-settings-desc": "Control where reminders are stored and keep the folder visible.",
+    "panel-settings-desc":
+      "Control where reminders are stored and keep the folder visible.",
     "storage-label": "Data folder:",
     "change-path-btn": "Change",
     "open-path-btn": "Open",
@@ -290,10 +292,12 @@ const translations = {
     "nav-completed": "Завершені",
     "nav-settings": "Налаштування",
     "panel-upcoming-title": "Заплановані нагадування",
-    "panel-upcoming-desc": "Керуйте своїми майбутніми завданнями та швидко переносьте їх.",
+    "panel-upcoming-desc":
+      "Керуйте своїми майбутніми завданнями та швидко переносьте їх.",
     "search-active": "Пошук нагадувань...",
     "panel-history-title": "Завершені нагадування",
-    "panel-history-desc": "Архівні нагадування зберігаються окремо для оптимізації.",
+    "panel-history-desc":
+      "Архівні нагадування зберігаються окремо для оптимізації.",
     "search-history": "Пошук завершених...",
     "delete-history-title": "Видалити історію",
     "delete-btn": "Видалити вибране",
@@ -305,7 +309,8 @@ const translations = {
     "filter-last-week": "Останні 7 днів",
     "filter-all-time": "Весь час",
     "panel-settings-title": "Налаштування",
-    "panel-settings-desc": "Керуйте місцезнаходженням нагадувань та видимістю папки.",
+    "panel-settings-desc":
+      "Керуйте місцезнаходженням нагадувань та видимістю папки.",
     "storage-label": "Папка даних:",
     "change-path-btn": "Змінити",
     "open-path-btn": "Відкрити",
@@ -396,8 +401,7 @@ function updateAllTranslations() {
   if (upcomingDesc) upcomingDesc.textContent = t("panel-upcoming-desc");
 
   const activeSearchInput = document.getElementById("activeSearch");
-  if (activeSearchInput)
-    activeSearchInput.placeholder = t("search-active");
+  if (activeSearchInput) activeSearchInput.placeholder = t("search-active");
 
   const historyTitle = document.querySelector("#historyPanel .panel-header h2");
   const historyDesc = document.querySelector("#historyPanel .panel-header p");
@@ -405,8 +409,7 @@ function updateAllTranslations() {
   if (historyDesc) historyDesc.textContent = t("panel-history-desc");
 
   const historySearchInput = document.getElementById("historySearch");
-  if (historySearchInput)
-    historySearchInput.placeholder = t("search-history");
+  if (historySearchInput) historySearchInput.placeholder = t("search-history");
 
   // Update delete controls
   const deleteTitle = document.querySelector(".delete-history-section h3");
@@ -435,7 +438,9 @@ function updateAllTranslations() {
   });
 
   // Update settings panel
-  const settingsTitle = document.querySelector("#settingsPanel .panel-header h2");
+  const settingsTitle = document.querySelector(
+    "#settingsPanel .panel-header h2",
+  );
   const settingsDesc = document.querySelector("#settingsPanel .panel-header p");
   if (settingsTitle) settingsTitle.textContent = t("panel-settings-title");
   if (settingsDesc) settingsDesc.textContent = t("panel-settings-desc");
@@ -505,7 +510,7 @@ async function loadActiveFiltered(searchTerm = "") {
   const now = new Date();
   const filtered = searchTerm
     ? allReminders.filter((r) =>
-        r.text.toLowerCase().includes(searchTerm.toLowerCase())
+        r.text.toLowerCase().includes(searchTerm.toLowerCase()),
       )
     : allReminders;
   const upcoming = filtered
@@ -531,7 +536,7 @@ async function loadHistoryFiltered(searchTerm = "") {
   allHistory = await electronAPI.getHistory();
   const filtered = searchTerm
     ? allHistory.filter((r) =>
-        r.text.toLowerCase().includes(searchTerm.toLowerCase())
+        r.text.toLowerCase().includes(searchTerm.toLowerCase()),
       )
     : allHistory;
   const completed = filtered.length;
@@ -551,19 +556,15 @@ if (electronAPI.onRefreshReminders) {
 
 // Search functionality
 if (document.getElementById("activeSearch")) {
-  document
-    .getElementById("activeSearch")
-    .addEventListener("input", (e) => {
-      loadActiveFiltered(e.target.value);
-    });
+  document.getElementById("activeSearch").addEventListener("input", (e) => {
+    loadActiveFiltered(e.target.value);
+  });
 }
 
 if (document.getElementById("historySearch")) {
-  document
-    .getElementById("historySearch")
-    .addEventListener("input", (e) => {
-      loadHistoryFiltered(e.target.value);
-    });
+  document.getElementById("historySearch").addEventListener("input", (e) => {
+    loadHistoryFiltered(e.target.value);
+  });
 }
 
 // Delete history controls
@@ -605,7 +606,9 @@ if (document.getElementById("deleteHistoryBtn")) {
     }
 
     deleteConfirm.classList.add("hidden");
-    await loadHistoryFiltered(document.getElementById("historySearch")?.value || "");
+    await loadHistoryFiltered(
+      document.getElementById("historySearch")?.value || "",
+    );
   });
 }
 
@@ -679,28 +682,30 @@ if (document.getElementById("openPathBtn")) {
 
 if (document.getElementById("addForm")) {
   const now = new Date();
-  
+
   // Get input and dropdown elements
   const yearInput = document.getElementById("yearInput");
   const monthInput = document.getElementById("monthInput");
   const dayInput = document.getElementById("dayInput");
   const hourInput = document.getElementById("hourInput");
   const minuteInput = document.getElementById("minuteInput");
-  
+
   const yearBtn = document.getElementById("yearDropdownBtn");
   const monthBtn = document.getElementById("monthDropdownBtn");
   const dayBtn = document.getElementById("dayDropdownBtn");
   const hourBtn = document.getElementById("hourDropdownBtn");
   const minuteBtn = document.getElementById("minuteDropdownBtn");
-  
+
   const yearDropdown = document.getElementById("yearDropdown");
   const monthDropdown = document.getElementById("monthDropdown");
   const dayDropdown = document.getElementById("dayDropdown");
   const hourDropdown = document.getElementById("hourDropdown");
   const minuteDropdown = document.getElementById("minuteDropdown");
-  
+
   const dayOfWeekSpan = document.getElementById("dayOfWeek");
   const monthOfYearSpan = document.getElementById("monthOfYear");
+
+  const syncNowBtn = document.getElementById("syncNowBtn");
 
   // Set default values
   yearInput.value = now.getFullYear();
@@ -715,21 +720,53 @@ if (document.getElementById("addForm")) {
     const month = parseInt(monthInput.value, 10);
     const day = parseInt(dayInput.value, 10);
     const testDate = new Date(year, month - 1, day);
-    if (!isNaN(testDate.getTime()) && month >= 1 && month <= 12 && day >= 1 && day <= 31) {
+    if (
+      !isNaN(testDate.getTime()) &&
+      month >= 1 &&
+      month <= 12 &&
+      day >= 1 &&
+      day <= 31
+    ) {
       const dayIndex = testDate.getDay();
-      const dayKeys = ["day-sunday", "day-monday", "day-tuesday", "day-wednesday", "day-thursday", "day-friday", "day-saturday"];
+      const dayKeys = [
+        "day-sunday",
+        "day-monday",
+        "day-tuesday",
+        "day-wednesday",
+        "day-thursday",
+        "day-friday",
+        "day-saturday",
+      ];
       if (dayOfWeekSpan) dayOfWeekSpan.textContent = t(dayKeys[dayIndex]);
-      
+
       const monthIndex = month - 1;
-      const monthKeys = ["month-january", "month-february", "month-march", "month-april", "month-may", "month-june", "month-july", "month-august", "month-september", "month-october", "month-november", "month-december"];
-      if (monthOfYearSpan && monthIndex >= 0 && monthIndex < 12) monthOfYearSpan.textContent = t(monthKeys[monthIndex]);
+      const monthKeys = [
+        "month-january",
+        "month-february",
+        "month-march",
+        "month-april",
+        "month-may",
+        "month-june",
+        "month-july",
+        "month-august",
+        "month-september",
+        "month-october",
+        "month-november",
+        "month-december",
+      ];
+      if (monthOfYearSpan && monthIndex >= 0 && monthIndex < 12)
+        monthOfYearSpan.textContent = t(monthKeys[monthIndex]);
     }
   }
 
   // Helper to create and populate a dropdown
-  function createDropdownOptions(dropdown, values, formatter = v => String(v).padStart(2, "0")) {
+  function createDropdownOptions(
+    dropdown,
+    values,
+    formatter = (v) => String(v).padStart(2, "0"),
+  ) {
     dropdown.innerHTML = "";
-    values.forEach(val => {
+    values.forEach((val) => {
       const btn = document.createElement("button");
       btn.type = "button";
       btn.className = "datetime-option";
@@ -739,28 +776,33 @@ if (document.getElementById("addForm")) {
   }
 
   // Populate year dropdown (current year ± 5-10)
-  createDropdownOptions(yearDropdown, 
-    Array.from({length: 16}, (_, i) => now.getFullYear() - 5 + i)
+  createDropdownOptions(
+    yearDropdown,
+    Array.from({ length: 16 }, (_, i) => now.getFullYear() - 5 + i),
   );
 
   // Populate month dropdown
-  createDropdownOptions(monthDropdown,
-    Array.from({length: 12}, (_, i) => i + 1)
+  createDropdownOptions(
+    monthDropdown,
+    Array.from({ length: 12 }, (_, i) => i + 1),
   );
 
   // Populate day dropdown (1-31)
-  createDropdownOptions(dayDropdown,
-    Array.from({length: 31}, (_, i) => i + 1)
+  createDropdownOptions(
+    dayDropdown,
+    Array.from({ length: 31 }, (_, i) => i + 1),
   );
 
   // Populate hour dropdown (0-23)
-  createDropdownOptions(hourDropdown,
-    Array.from({length: 24}, (_, i) => i)
+  createDropdownOptions(
+    hourDropdown,
+    Array.from({ length: 24 }, (_, i) => i),
   );
 
   // Populate minute dropdown (0-59, in 5-minute increments)
-  createDropdownOptions(minuteDropdown,
-    Array.from({length: 12}, (_, i) => i * 5)
+  createDropdownOptions(
+    minuteDropdown,
+    Array.from({ length: 12 }, (_, i) => i * 5),
   );
 
   // Helper to toggle dropdown and handle selection
@@ -789,83 +831,91 @@ if (document.getElementById("addForm")) {
   // Close dropdowns when clicking outside
   document.addEventListener("click", (e) => {
     if (!e.target.closest(".datetime-field")) {
-      [yearDropdown, monthDropdown, dayDropdown, hourDropdown, minuteDropdown].forEach(d => {
+      [
+        yearDropdown,
+        monthDropdown,
+        dayDropdown,
+        hourDropdown,
+        minuteDropdown,
+      ].forEach((d) => {
         d.classList.remove("open");
       });
     }
   });
 
   // Update day of week on input change
-  [yearInput, monthInput, dayInput].forEach(input => {
+  [yearInput, monthInput, dayInput].forEach((input) => {
     input.addEventListener("input", updateDateDisplay);
   });
 
   // Initial date display
   updateDateDisplay();
 
-  document.getElementById("addForm").addEventListener("submit", async (event) => {
-    event.preventDefault();
-    const text = document.getElementById("text").value.trim();
-    
-    if (!text) {
-      alert("Please enter a reminder text.");
-      return;
-    }
+  document
+    .getElementById("addForm")
+    .addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const text = document.getElementById("text").value.trim();
 
-    let year = parseInt(yearInput.value, 10);
-    let month = parseInt(monthInput.value, 10);
-    let day = parseInt(dayInput.value, 10);
-    let hour = parseInt(hourInput.value, 10);
-    let minute = parseInt(minuteInput.value, 10);
+      if (!text) {
+        alert("Please enter a reminder text.");
+        return;
+      }
 
-    if (!year || year < 2026 || year > 2100) {
-      alert("Please enter a valid year (2026-2100).");
-      return;
-    }
+      let year = parseInt(yearInput.value, 10);
+      let month = parseInt(monthInput.value, 10);
+      let day = parseInt(dayInput.value, 10);
+      let hour = parseInt(hourInput.value, 10);
+      let minute = parseInt(minuteInput.value, 10);
 
-    if (!month || month < 1 || month > 12) {
-      alert("Please enter a valid month (1-12).");
-      return;
-    }
+      if (!year || year < 2026 || year > 2100) {
+        alert("Please enter a valid year (2026-2100).");
+        return;
+      }
 
-    if (!day || day < 1 || day > 31) {
-      alert("Please enter a valid day (1-31).");
-      return;
-    }
+      if (!month || month < 1 || month > 12) {
+        alert("Please enter a valid month (1-12).");
+        return;
+      }
 
-    if (isNaN(hour) || hour < 0 || hour > 23) {
-      alert("Please enter a valid hour (0-23).");
-      return;
-    }
+      if (!day || day < 1 || day > 31) {
+        alert("Please enter a valid day (1-31).");
+        return;
+      }
 
-    if (isNaN(minute) || minute < 0 || minute > 59) {
-      alert("Please enter a valid minute (0-59).");
-      return;
-    }
+      if (isNaN(hour) || hour < 0 || hour > 23) {
+        alert("Please enter a valid hour (0-23).");
+        return;
+      }
 
-    const reminderDate = new Date(year, month - 1, day, hour, minute);
-    if (isNaN(reminderDate.getTime())) {
-      alert("Please enter a valid date.");
-      return;
-    }
+      if (isNaN(minute) || minute < 0 || minute > 59) {
+        alert("Please enter a valid minute (0-59).");
+        return;
+      }
 
-    if (reminderDate <= now) {
-      alert("Reminder time must be in the future.");
-      return;
-    }
+      const reminderDate = new Date(year, month - 1, day, hour, minute);
+      if (isNaN(reminderDate.getTime())) {
+        alert("Please enter a valid date.");
+        return;
+      }
 
-    try {
-      await electronAPI.addReminder({
-        text,
-        time: reminderDate.toISOString(),
-        done: false,
-      });
-      window.close();
-    } catch (error) {
-      console.error("addReminder failed", error);
-      alert("Unable to save reminder. Please try again.");
-    }
-  });
+      if (reminderDate <= now) {
+        alert("Reminder time must be in the future.");
+        return;
+      }
+
+      try {
+        await electronAPI.addReminder({
+          text,
+          time: reminderDate.toISOString(),
+          done: false,
+        });
+        window.close();
+      } catch (error) {
+        console.error("addReminder failed", error);
+        alert("Unable to save reminder. Please try again.");
+      }
+    });
 }
 
 if (
@@ -878,4 +928,18 @@ if (
 
 if (document.getElementById("addForm")) {
   updateAddModalTranslations();
+}
+
+if (syncNowBtn) {
+  syncNowBtn.addEventListener("click", () => {
+    const now = new Date();
+
+    yearInput.value = now.getFullYear();
+    monthInput.value = String(now.getMonth() + 1).padStart(2, "0");
+    dayInput.value = String(now.getDate()).padStart(2, "0");
+    hourInput.value = String(now.getHours()).padStart(2, "0");
+    minuteInput.value = String(now.getMinutes()).padStart(2, "0");
+
+    updateDateDisplay();
+  });
 }

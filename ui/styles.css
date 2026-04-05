@@ -73,7 +73,9 @@ h1 {
   border: 1px solid rgba(148, 163, 184, 0.16);
   box-shadow: 0 18px 40px rgba(15, 23, 42, 0.06);
   cursor: pointer;
-  transition: transform 0.15s ease, box-shadow 0.15s ease;
+  transition:
+    transform 0.15s ease,
+    box-shadow 0.15s ease;
 }
 
 .menu-card strong {
@@ -96,7 +98,9 @@ h1 {
   background: #ffffff;
   border-radius: 20px;
   padding: 12px 14px;
-  box-shadow: inset 0 0 0 1px rgba(148, 163, 184, 0.08), 0 8px 20px rgba(15, 23, 42, 0.04);
+  box-shadow:
+    inset 0 0 0 1px rgba(148, 163, 184, 0.08),
+    0 8px 20px rgba(15, 23, 42, 0.04);
   border: 1px solid rgba(148, 163, 184, 0.12);
 }
 
@@ -124,6 +128,28 @@ h1 {
   border-radius: 28px;
 }
 
+.label-row label {
+  margin: 0;
+}
+.label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.sync-now-btn {
+  font-size: 0.75rem;
+  padding: 4px 10px;
+  height: 26px;
+  flex: 0;
+  border-radius: 8px;
+  border: 1px solid #cbd5e1;
+  background: #f8fafc;
+  color: #334155;
+  cursor: pointer;
+  white-space: nowrap;
+}
 .view-button {
   border: none;
   background: transparent;
@@ -162,11 +188,9 @@ h1 {
   margin-bottom: 10px;
   color: #334155;
   font-weight: 600;
-  max-width: 760px; 
+  max-width: 760px;
   /* padding: 28px 32px; */
 }
-
-
 
 .panel-header h2 {
   margin: 0 0 8px;
@@ -189,7 +213,10 @@ h1 {
   padding: 24px;
   box-shadow: 0 28px 70px rgba(15, 23, 42, 0.08);
   border: 1px solid rgba(148, 163, 184, 0.14);
-  transition: transform 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+  transition:
+    transform 0.15s ease,
+    border-color 0.15s ease,
+    box-shadow 0.15s ease;
 }
 
 .card:hover {
@@ -298,7 +325,9 @@ button,
   background: #f8fafc;
   color: #111827;
   border: 1px solid rgba(148, 163, 184, 0.24);
-  transition: transform 0.15s ease, background 0.15s ease;
+  transition:
+    transform 0.15s ease,
+    background 0.15s ease;
 }
 
 .secondary-btn:hover {
@@ -312,7 +341,9 @@ button,
   color: #1d4ed8;
   border: 1px solid rgba(59, 130, 246, 0.18);
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.6);
-  transition: transform 0.12s ease, background 0.12s ease;
+  transition:
+    transform 0.12s ease,
+    background 0.12s ease;
 }
 
 .card-action:hover {
@@ -445,7 +476,9 @@ select {
   color: #1f2937;
   height: 32px;
   text-align: center;
-  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  transition:
+    border-color 0.15s ease,
+    box-shadow 0.15s ease;
 }
 
 .datetime-input::placeholder {
@@ -458,7 +491,6 @@ select {
   border-color: #3b82f6;
   box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
 }
-
 
 .datetime-dropdown-btn {
   flex: 0 0 32px;
