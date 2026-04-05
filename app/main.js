@@ -45,9 +45,9 @@ function openMainWindow() {
     return;
   }
   mainWindow = new BrowserWindow({
-    width: 860,
+    width: 1000,
     height: 860,
-    minWidth: 780,
+    minWidth: 900,
     minHeight: 780,
     icon: appIcon,
     webPreferences: {

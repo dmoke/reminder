@@ -16,7 +16,7 @@ body {
 }
 
 .page-shell {
-  max-width: 760px;
+  max-width: 900px;
   margin: 24px auto;
   padding: 28px;
   background: rgba(255, 255, 255, 0.98);
@@ -163,7 +163,7 @@ h1 {
   color: #334155;
   font-weight: 600;
   max-width: 760px; 
-  padding: 28px 32px;
+  /* padding: 28px 32px; */
 }
 
 
@@ -369,7 +369,7 @@ select {
 }
 
 .add-shell {
-  max-width: 680px;
+  max-width: 800px;
   margin: 24px auto;
   padding: 28px;
   background: rgba(255, 255, 255, 0.98);
@@ -404,16 +404,9 @@ select {
 
 .date-time-grid {
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
-  gap: 8px;
+  grid-template-columns: repeat(5, minmax(50px, 1fr));
+  gap: 4px;
   margin-bottom: 8px;
-}
-
-.datetime-field {
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
 }
 
 .datetime-label {
@@ -424,29 +417,40 @@ select {
   letter-spacing: 0.06em;
 }
 
-.datetime-input-group {
+.datetime-field {
+  position: relative;
   display: flex;
-  height: 38px; 
-  align-items: center;
-  gap: 2px;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
 }
 
+.datetime-input-group {
+  display: flex;
+  align-items: flex-end;
+  gap: 0;
+  min-width: 0;
+  width: 100%;
+}
 .datetime-input {
   flex: 1;
-  padding: 6px 10px;
+  min-width: 0;
+  width: auto;
+  padding: 6px 8px;
   font-size: 0.85rem;
   border: 1px solid #cbd5e1;
+  border-right: none;
   border-radius: 4px 0 0 4px;
   background: white;
   color: #1f2937;
-  height: 34px;
+  height: 32px;
   text-align: center;
   transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
 .datetime-input::placeholder {
   color: #d1d5db;
-  font-size: 0.9rem;
+  font-size: 0.85rem;
 }
 
 .datetime-input:focus {
@@ -457,9 +461,10 @@ select {
 
 
 .datetime-dropdown-btn {
-  padding: 0 4px;
-  font-size: 0.75rem;
-  height: 34px;
+  flex: 0 0 32px;
+  padding: 0;
+  font-size: 0.85rem;
+  height: 32px;
   border: 1px solid #cbd5e1;
   border-left: none;
   border-radius: 0 4px 4px 0;
@@ -467,8 +472,6 @@ select {
   color: #6b7280;
   cursor: pointer;
   transition: all 0.15s ease;
-  flex-shrink: 0;
-  min-width: 28px;
   display: flex;
   align-items: center;
   justify-content: center;
