@@ -25,11 +25,12 @@ let mainWindow = null;
 let storage = null;
 let scheduler = null;
 let config = {};
+let isQuitting = false;
 
 function initApp() {
   config = Config.load();
   if (!config.dataPath) return false;
-  storage = new Storage(config.dataPath);
+  storage = new Storage(config.dataPath, openMainWindow);
   scheduler = new Scheduler(storage, openMainWindow);
   scheduler.start();
   return true;
@@ -41,7 +42,9 @@ function createTrayInstance() {
 
 function openMainWindow() {
   if (mainWindow) {
+    if (mainWindow.isMinimized()) mainWindow.restore();
     mainWindow.show();
+    mainWindow.focus();
     return;
   }
   mainWindow = new BrowserWindow({
@@ -56,10 +59,17 @@ function openMainWindow() {
       nodeIntegration: false,
     },
   });
+
   mainWindow.loadFile(path.join(__dirname, "..", "ui", "index.html"));
   if (!app.isPackaged) {
     mainWindow.webContents.openDevTools({ mode: "detach" });
   }
+  mainWindow.on("close", (e) => {
+    if (!isQuitting) {
+      e.preventDefault();
+      mainWindow.hide();
+    }
+  });
   mainWindow.on("closed", () => (mainWindow = null));
 }
 
@@ -72,7 +82,7 @@ function openAddWindow() {
     icon: appIcon,
     show: false,
     modal: true,
-    parent: mainWindow,
+    parent: mainWindow || undefined,
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
@@ -146,9 +156,9 @@ ipcMain.handle("choose-folder", async () => {
   if (result.canceled) return null;
   config.dataPath = result.filePaths[0];
   Config.save(config);
-  storage = new Storage(config.dataPath);
+  storage = new Storage(config.dataPath, openMainWindow);
   scheduler.stop();
-  scheduler = new Scheduler(storage);
+  scheduler = new Scheduler(storage, openMainWindow);
   scheduler.start();
   return config.dataPath;
 });
@@ -163,20 +173,32 @@ app.whenReady().then(async () => {
   console.log("main: app ready");
   if (!initApp()) {
     await firstLaunchSetup();
-    initApp();
+    if (!initApp()) {
+      app.quit();
+      return;
+    }
   }
   createTrayInstance();
   openMainWindow();
-  app.setLoginItemSettings({ openAtLogin: true });
+  app.setLoginItemSettings({
+    openAtLogin: true,
+    path: app.getPath("exe"),
+  });
 });
 
 app.on("window-all-closed", () => {});
-
+app.on("before-quit", () => {
+  isQuitting = true;
+});
 const gotTheLock = app.requestSingleInstanceLock();
 if (!gotTheLock) {
   app.quit();
 } else {
   app.on("second-instance", () => {
-    if (mainWindow) mainWindow.show();
+    if (mainWindow) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.show();
+      mainWindow.focus();
+    }
   });
 }
