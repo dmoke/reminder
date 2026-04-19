@@ -462,16 +462,24 @@ select {
   gap: 0;
   min-width: 0;
   width: 100%;
+
+  border: 1px solid #cbd5e1;
+  border-radius: 4px;
+  overflow: hidden; /* important to unify edges */
+  background: white;
+  transition:
+    border-color 0.15s ease,
+    box-shadow 0.15s ease;
 }
 .datetime-input {
+  border: none;
+  box-shadow: none;
   flex: 1;
   min-width: 0;
   width: auto;
   padding: 6px 8px;
   font-size: 0.85rem;
-  border: 1px solid #cbd5e1;
   border-right: none;
-  border-radius: 4px 0 0 4px;
   background: white;
   color: #1f2937;
   height: 32px;
@@ -485,7 +493,10 @@ select {
   color: #d1d5db;
   font-size: 0.85rem;
 }
-
+.datetime-input-group:focus-within {
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+}
 .datetime-input:focus {
   outline: none;
   border-color: #3b82f6;
@@ -497,7 +508,7 @@ select {
   padding: 0;
   font-size: 0.85rem;
   height: 32px;
-  border: 1px solid #cbd5e1;
+  border: none;
   border-left: none;
   border-radius: 0 4px 4px 0;
   background: white;
