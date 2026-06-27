@@ -14,6 +14,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
   getConfig: () => ipcRenderer.invoke("get-config"),
   chooseFolder: () => ipcRenderer.invoke("choose-folder"),
   openFolder: () => ipcRenderer.invoke("open-folder"),
+  setLoginItem: (enabled) => ipcRenderer.invoke("set-login-item", enabled),
   onRefreshReminders: (callback) =>
     ipcRenderer.on("refresh-reminders", callback),
 });

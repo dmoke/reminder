@@ -3,6 +3,10 @@
   <head>
     <meta charset="UTF-8" />
     <title>Add Reminder</title>
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline';"
+    />
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
@@ -45,7 +49,7 @@
                     ▼
                   </button>
                 </div>
-                <div class="datetime-dropdown hidden" id="yearDropdown"></div>
+                <div class="datetime-dropdown" id="yearDropdown"></div>
               </div>
               <div class="datetime-field">
                 <label class="datetime-label">Month</label>
@@ -65,7 +69,7 @@
                     ▼
                   </button>
                 </div>
-                <div class="datetime-dropdown hidden" id="monthDropdown"></div>
+                <div class="datetime-dropdown" id="monthDropdown"></div>
                 <span id="monthOfYear" class="datetime-hint"></span>
               </div>
               <div class="datetime-field">
@@ -86,7 +90,7 @@
                     ▼
                   </button>
                 </div>
-                <div class="datetime-dropdown hidden" id="dayDropdown"></div>
+                <div class="datetime-dropdown" id="dayDropdown"></div>
                 <span id="dayOfWeek" class="datetime-hint"></span>
               </div>
               <div class="datetime-field">
@@ -107,7 +111,7 @@
                     ▼
                   </button>
                 </div>
-                <div class="datetime-dropdown hidden" id="hourDropdown"></div>
+                <div class="datetime-dropdown" id="hourDropdown"></div>
               </div>
               <div class="datetime-field">
                 <label class="datetime-label">Minute</label>
@@ -127,7 +131,7 @@
                     ▼
                   </button>
                 </div>
-                <div class="datetime-dropdown hidden" id="minuteDropdown"></div>
+                <div class="datetime-dropdown" id="minuteDropdown"></div>
               </div>
             </div>
           </div>

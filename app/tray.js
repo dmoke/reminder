@@ -1,7 +1,7 @@
 const { Tray, Menu, nativeImage } = require("electron");
 const path = require("path");
 
-function createTray(openMainWindow) {
+function createTray(openMainWindow, openAddWindow) {
   let icon;
   const iconPath = path.join(__dirname, "assets", "icon.ico");
   try {
@@ -14,11 +14,14 @@ function createTray(openMainWindow) {
   }
   const tray = new Tray(icon);
   const contextMenu = Menu.buildFromTemplate([
-    { label: "Close", click: () => require("electron").app.quit() },
+    { label: "Open Reminders", click: () => openMainWindow() },
+    { label: "Add Reminder", click: () => openAddWindow() },
+    { type: "separator" },
+    { label: "Quit", click: () => require("electron").app.quit() },
   ]);
   tray.setToolTip("Reminders");
   tray.setContextMenu(contextMenu);
-  tray.on("click", openMainWindow);
+  tray.on("click", () => openMainWindow());
   return tray;
 }
 

@@ -6,13 +6,14 @@ if (!electronAPI) {
     getReminders: async () => [],
     getHistory: async () => [],
     openAddWindow: async () => {},
-    getConfig: async () => ({ dataPath: "" }),
+    getConfig: async () => ({ dataPath: "", openAtLogin: true }),
     chooseFolder: async () => null,
     openFolder: async () => false,
     addReminder: async () => {},
     updateReminder: async () => {},
     archiveReminder: async () => {},
     deleteReminder: async () => {},
+    setLoginItem: async () => true,
   };
 }
 
@@ -22,6 +23,18 @@ const overdueCount = document.getElementById("overdueCount");
 const upcomingCount = document.getElementById("upcomingCount");
 const completedCount = document.getElementById("completedCount");
 const viewButtons = Array.from(document.querySelectorAll(".view-button"));
+
+let allReminders = [];
+let allHistory = [];
+let currentLang = localStorage.getItem("language") || "en";
+
+function activeSearchValue() {
+  return document.getElementById("activeSearch")?.value || "";
+}
+
+function historySearchValue() {
+  return document.getElementById("historySearch")?.value || "";
+}
 
 function setView(targetId) {
   viewButtons.forEach((button) => {
@@ -52,6 +65,24 @@ function formatRemainingTime(ms) {
   if (days > 0) return `${days}d ${hours}h`;
   if (hours > 0) return `${hours}h ${minutes}m`;
   return `${minutes}m`;
+}
+
+function makeEmptyState(message) {
+  const el = document.createElement("div");
+  el.className = "empty-state";
+  el.textContent = message;
+  return el;
+}
+
+// Convert a Date/ISO string into the local value expected by an
+// <input type="datetime-local"> (YYYY-MM-DDTHH:MM, no timezone).
+function toDatetimeLocal(value) {
+  const d = new Date(value);
+  if (isNaN(d.getTime())) return "";
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(
+    d.getHours(),
+  )}:${pad(d.getMinutes())}`;
 }
 
 function createCard(reminder, isHistory) {
@@ -111,22 +142,6 @@ function createCard(reminder, isHistory) {
   actions.className = "button-group";
 
   if (!isHistory) {
-    const reschedule = document.createElement("button");
-    reschedule.className = "card-action";
-    reschedule.textContent = t("card-btn-reschedule");
-    reschedule.addEventListener("click", async () => {
-      const newTime = prompt(
-        "New date/time (YYYY-MM-DDTHH:MM):",
-        reminder.time.slice(0, 16),
-      );
-      if (newTime) {
-        await electronAPI.updateReminder(reminder.id, {
-          time: new Date(newTime).toISOString(),
-        });
-        loadAll();
-      }
-    });
-
     const complete = document.createElement("button");
     complete.className = "card-action";
     complete.textContent = t("card-btn-complete");
@@ -135,22 +150,59 @@ function createCard(reminder, isHistory) {
       loadAll();
     });
 
-    const snooze = document.createElement("button");
-    snooze.className = "card-action";
-    snooze.textContent = t("card-btn-snooze");
-    snooze.addEventListener("click", async () => {
-      const snoozeTime = new Date(Date.now() + 10 * 60 * 1000).toISOString();
-      await electronAPI.updateReminder(reminder.id, { time: snoozeTime });
-      loadAll();
-    });
+    const edit = document.createElement("button");
+    edit.className = "card-action";
+    edit.textContent = t("card-btn-edit");
+    edit.addEventListener("click", () => openEditModal(reminder));
 
-    actions.append(reschedule, complete, snooze);
+    actions.append(complete, edit);
+
+    const snoozeGroup = document.createElement("div");
+    snoozeGroup.className = "snooze-group";
+    const snoozeLabel = document.createElement("span");
+    snoozeLabel.className = "snooze-label";
+    snoozeLabel.textContent = t("card-snooze-label");
+    snoozeGroup.appendChild(snoozeLabel);
+    ["10m", "1d", "2d", "1w", "1m"].forEach((type) => {
+      const btn = document.createElement("button");
+      btn.className = "card-action snooze-chip";
+      btn.textContent = t("snooze-" + type);
+      btn.addEventListener("click", async () => {
+        // Snooze relative to the later of "now" and the reminder's scheduled
+        // time, so snoozing a future reminder never pulls it earlier.
+        const baseMs = isNaN(reminderTime.getTime())
+          ? Date.now()
+          : Math.max(Date.now(), reminderTime.getTime());
+        const newTime = getSnoozeTime(new Date(baseMs), type);
+        await electronAPI.updateReminder(reminder.id, { time: newTime });
+        loadAll();
+      });
+      snoozeGroup.appendChild(btn);
+    });
+    actions.appendChild(snoozeGroup);
   }
 
+  // Single delete/remove uses an inline two-step confirm so one misclick
+  // cannot permanently destroy a reminder (matches the bulk-delete safety).
   const remove = document.createElement("button");
   remove.className = "card-action danger";
-  remove.textContent = isHistory ? t("card-btn-remove") : t("card-btn-delete");
+  const removeLabel = isHistory ? t("card-btn-remove") : t("card-btn-delete");
+  remove.textContent = removeLabel;
+  let armed = false;
+  let armTimer = null;
   remove.addEventListener("click", async () => {
+    if (!armed) {
+      armed = true;
+      remove.textContent = t("confirm-delete");
+      remove.classList.add("armed");
+      armTimer = setTimeout(() => {
+        armed = false;
+        remove.textContent = removeLabel;
+        remove.classList.remove("armed");
+      }, 3000);
+      return;
+    }
+    if (armTimer) clearTimeout(armTimer);
     await electronAPI.deleteReminder(reminder.id);
     loadAll();
   });
@@ -160,11 +212,126 @@ function createCard(reminder, isHistory) {
   return card;
 }
 
-async function loadActive() {
+function getSnoozeTime(baseDate, type) {
+  const date = new Date(baseDate);
+
+  switch (type) {
+    case "10m":
+      date.setMinutes(date.getMinutes() + 10);
+      break;
+    case "1d":
+      date.setDate(date.getDate() + 1);
+      break;
+    case "2d":
+      date.setDate(date.getDate() + 2);
+      break;
+    case "1w":
+      date.setDate(date.getDate() + 7);
+      break;
+    case "1m":
+      date.setMonth(date.getMonth() + 1);
+      break;
+  }
+
+  return date.toISOString();
+}
+
+// In-app reschedule/edit dialog. Replaces window.prompt(), which Electron's
+// renderer does not implement. Edits both the text and the date/time.
+function openEditModal(reminder) {
+  const existing = document.querySelector(".modal-overlay");
+  if (existing) existing.remove();
+
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay";
+  const modal = document.createElement("div");
+  modal.className = "modal";
+
+  const heading = document.createElement("h2");
+  heading.textContent = t("edit-title");
+
+  const textLabel = document.createElement("label");
+  textLabel.textContent = t("edit-text-label");
+  const textInput = document.createElement("input");
+  textInput.type = "text";
+  textInput.value = reminder.text || "";
+
+  const timeLabel = document.createElement("label");
+  timeLabel.textContent = t("edit-time-label");
+  const timeInput = document.createElement("input");
+  timeInput.type = "datetime-local";
+  timeInput.value = toDatetimeLocal(reminder.time);
+
+  const error = document.createElement("p");
+  error.className = "modal-error";
+
+  const actions = document.createElement("div");
+  actions.className = "modal-actions";
+  const cancelBtn = document.createElement("button");
+  cancelBtn.className = "secondary-btn";
+  cancelBtn.textContent = t("modal-cancel");
+  const saveBtn = document.createElement("button");
+  saveBtn.className = "primary-btn";
+  saveBtn.textContent = t("modal-save");
+  actions.append(cancelBtn, saveBtn);
+
+  function close() {
+    overlay.remove();
+    document.removeEventListener("keydown", onKey);
+  }
+  function onKey(e) {
+    if (e.key === "Escape") close();
+  }
+
+  cancelBtn.addEventListener("click", close);
+  overlay.addEventListener("click", (e) => {
+    if (e.target === overlay) close();
+  });
+  document.addEventListener("keydown", onKey);
+
+  saveBtn.addEventListener("click", async () => {
+    const text = textInput.value.trim();
+    if (!text) {
+      error.textContent = t("alert-empty-text");
+      return;
+    }
+    const when = new Date(timeInput.value);
+    if (isNaN(when.getTime())) {
+      error.textContent = t("alert-invalid-date");
+      return;
+    }
+    if (when <= new Date()) {
+      error.textContent = t("alert-past-time");
+      return;
+    }
+    try {
+      await electronAPI.updateReminder(reminder.id, {
+        text,
+        time: when.toISOString(),
+      });
+      close();
+      loadAll();
+    } catch (err) {
+      console.error("updateReminder failed", err);
+      error.textContent = t("alert-save-failed");
+    }
+  });
+
+  modal.append(heading, textLabel, textInput, timeLabel, timeInput, error, actions);
+  overlay.appendChild(modal);
+  document.body.appendChild(overlay);
+  textInput.focus();
+}
+
+async function loadActiveFiltered(searchTerm = "") {
   if (!activeList) return; // Guard against add-reminder window
-  const reminders = await electronAPI.getReminders();
+  allReminders = await electronAPI.getReminders();
   const now = new Date();
-  const upcoming = reminders
+  const term = searchTerm.toLowerCase();
+  const filtered = term
+    ? allReminders.filter((r) => (r.text || "").toLowerCase().includes(term))
+    : allReminders;
+  const upcoming = filtered
     .slice()
     .sort((a, b) => new Date(a.time) - new Date(b.time));
   activeList.innerHTML = "";
@@ -178,28 +345,52 @@ async function loadActive() {
     activeList.appendChild(createCard(reminder, false));
   });
 
+  if (!upcoming.length) {
+    activeList.appendChild(
+      makeEmptyState(term ? t("empty-no-results") : t("empty-active")),
+    );
+  }
+
   if (overdueCount) overdueCount.textContent = overdue.toString();
   if (upcomingCount) upcomingCount.textContent = upcomingCountValue.toString();
 }
 
-async function loadHistory() {
+async function loadHistoryFiltered(searchTerm = "") {
   if (!historyList) return; // Guard against add-reminder window
-  const history = await electronAPI.getHistory();
-  const completed = history.length;
-  if (completedCount) completedCount.textContent = completed.toString();
+  allHistory = await electronAPI.getHistory();
+  const term = searchTerm.toLowerCase();
+  const filtered = term
+    ? allHistory.filter((r) => (r.text || "").toLowerCase().includes(term))
+    : allHistory;
+  if (completedCount) completedCount.textContent = filtered.length.toString();
   historyList.innerHTML = "";
-  history
+  const sorted = filtered
     .slice()
-    .sort((a, b) => new Date(b.completedAt) - new Date(a.completedAt))
-    .forEach((item) => historyList.appendChild(createCard(item, true)));
+    .sort((a, b) => new Date(b.completedAt) - new Date(a.completedAt));
+  sorted.forEach((item) => historyList.appendChild(createCard(item, true)));
+  if (!sorted.length) {
+    historyList.appendChild(
+      makeEmptyState(term ? t("empty-no-results") : t("empty-completed")),
+    );
+  }
 }
 
 async function loadConfig() {
   const config = await electronAPI.getConfig();
   const dataPathEl = document.getElementById("dataPath");
   if (dataPathEl) {
-    dataPathEl.textContent = config.dataPath || "Not set";
+    dataPathEl.textContent = config.dataPath || t("storage-not-set");
   }
+  const loginToggle = document.getElementById("loginToggle");
+  if (loginToggle) {
+    loginToggle.checked = config.openAtLogin !== false;
+  }
+}
+
+async function loadAll() {
+  await loadActiveFiltered(activeSearchValue());
+  await loadHistoryFiltered(historySearchValue());
+  await loadConfig();
 }
 
 // Translations object
@@ -222,7 +413,7 @@ const translations = {
       "Archived reminders are stored separately for performance.",
     "search-history": "Search completed...",
     "delete-history-title": "Delete history",
-    "delete-btn": "Delete selected",
+    "delete-btn": "Delete in range",
     "delete-confirm-msg": "Are you sure? This action cannot be undone.",
     "delete-confirm-btn": "Confirm delete",
     "delete-cancel-btn": "Cancel",
@@ -234,16 +425,19 @@ const translations = {
     "panel-settings-desc":
       "Control where reminders are stored and keep the folder visible.",
     "storage-label": "Data folder:",
+    "storage-not-set": "Not set",
     "change-path-btn": "Change",
     "open-path-btn": "Open",
     "language-label": "Language:",
     "lang-en": "English",
     "lang-uk": "Українська",
+    "startup-label": "Start with Windows:",
     "add-modal-eyebrow": "New reminder",
     "add-modal-title": "Add reminder",
     "add-modal-text-label": "What do you want to remember?",
     "add-modal-text-placeholder": "Reminder text",
     "add-modal-time-label": "When should it alert?",
+    "add-modal-now-btn": "Now",
     "add-modal-year-label": "Year",
     "add-modal-month-label": "Month",
     "add-modal-day-label": "Day",
@@ -275,11 +469,34 @@ const translations = {
     "card-badge-overdue": "Overdue",
     "card-badge-upcoming": "Upcoming",
     "card-badge-completed": "Completed",
-    "card-btn-reschedule": "Reschedule",
+    "card-btn-edit": "Edit",
     "card-btn-complete": "Complete",
-    "card-btn-snooze": "Snooze 10m",
+    "card-snooze-label": "Snooze",
     "card-btn-delete": "Delete",
     "card-btn-remove": "Remove",
+    "confirm-delete": "Click to confirm",
+    "snooze-10m": "10m",
+    "snooze-1d": "1d",
+    "snooze-2d": "2d",
+    "snooze-1w": "1w",
+    "snooze-1m": "1mo",
+    "edit-title": "Edit reminder",
+    "edit-text-label": "Reminder text",
+    "edit-time-label": "Date & time",
+    "modal-cancel": "Cancel",
+    "modal-save": "Save",
+    "empty-active": "No reminders yet. Add one to get started.",
+    "empty-completed": "No completed reminders yet.",
+    "empty-no-results": "No reminders match your search.",
+    "alert-empty-text": "Please enter a reminder text.",
+    "alert-invalid-year": "Please enter a valid year.",
+    "alert-invalid-month": "Please enter a valid month (1-12).",
+    "alert-invalid-day": "Please enter a valid day (1-31).",
+    "alert-invalid-hour": "Please enter a valid hour (0-23).",
+    "alert-invalid-minute": "Please enter a valid minute (0-59).",
+    "alert-invalid-date": "That date does not exist. Please check the day.",
+    "alert-past-time": "Reminder time must be in the future.",
+    "alert-save-failed": "Unable to save reminder. Please try again.",
   },
   uk: {
     "eyebrow-title": "Ваші нагадування",
@@ -300,7 +517,7 @@ const translations = {
       "Архівні нагадування зберігаються окремо для оптимізації.",
     "search-history": "Пошук завершених...",
     "delete-history-title": "Видалити історію",
-    "delete-btn": "Видалити вибране",
+    "delete-btn": "Видалити за період",
     "delete-confirm-msg": "Ви впевнені? Цю дію неможливо скасувати.",
     "delete-confirm-btn": "Підтвердити видалення",
     "delete-cancel-btn": "Скасувати",
@@ -312,16 +529,19 @@ const translations = {
     "panel-settings-desc":
       "Керуйте місцезнаходженням нагадувань та видимістю папки.",
     "storage-label": "Папка даних:",
+    "storage-not-set": "Не вказано",
     "change-path-btn": "Змінити",
     "open-path-btn": "Відкрити",
     "language-label": "Мова:",
     "lang-en": "English",
     "lang-uk": "Українська",
+    "startup-label": "Запускати разом із Windows:",
     "add-modal-eyebrow": "Нове нагадування",
     "add-modal-title": "Додати нагадування",
     "add-modal-text-label": "Що ви хочете запам'ятати?",
     "add-modal-text-placeholder": "Текст нагадування",
     "add-modal-time-label": "Коли це повинне спрацювати?",
+    "add-modal-now-btn": "Зараз",
     "add-modal-year-label": "Рік",
     "add-modal-month-label": "Місяць",
     "add-modal-day-label": "День",
@@ -353,11 +573,34 @@ const translations = {
     "card-badge-overdue": "Прострочено",
     "card-badge-upcoming": "Майбутнє",
     "card-badge-completed": "Завершено",
-    "card-btn-reschedule": "Перенести",
+    "card-btn-edit": "Редагувати",
     "card-btn-complete": "Завершити",
-    "card-btn-snooze": "Відкласти 10м",
+    "card-snooze-label": "Відкласти",
     "card-btn-delete": "Видалити",
     "card-btn-remove": "Видалити",
+    "confirm-delete": "Натисніть, щоб підтвердити",
+    "snooze-10m": "10 хв",
+    "snooze-1d": "1 д",
+    "snooze-2d": "2 д",
+    "snooze-1w": "1 тиж",
+    "snooze-1m": "1 міс",
+    "edit-title": "Редагувати нагадування",
+    "edit-text-label": "Текст нагадування",
+    "edit-time-label": "Дата та час",
+    "modal-cancel": "Скасувати",
+    "modal-save": "Зберегти",
+    "empty-active": "Поки що немає нагадувань. Додайте перше.",
+    "empty-completed": "Поки що немає завершених нагадувань.",
+    "empty-no-results": "Немає нагадувань за вашим запитом.",
+    "alert-empty-text": "Будь ласка, введіть текст нагадування.",
+    "alert-invalid-year": "Будь ласка, введіть коректний рік.",
+    "alert-invalid-month": "Будь ласка, введіть коректний місяць (1-12).",
+    "alert-invalid-day": "Будь ласка, введіть коректний день (1-31).",
+    "alert-invalid-hour": "Будь ласка, введіть коректну годину (0-23).",
+    "alert-invalid-minute": "Будь ласка, введіть коректну хвилину (0-59).",
+    "alert-invalid-date": "Такої дати не існує. Перевірте день.",
+    "alert-past-time": "Час нагадування має бути в майбутньому.",
+    "alert-save-failed": "Не вдалося зберегти нагадування. Спробуйте ще раз.",
   },
 };
 
@@ -366,7 +609,6 @@ function t(key) {
 }
 
 function updateAllTranslations() {
-  // Update header
   const eyebrow = document.querySelector(".eyebrow");
   const mainTitle = document.querySelector("h1");
   const addBtn = document.getElementById("addBtn");
@@ -375,26 +617,19 @@ function updateAllTranslations() {
   if (mainTitle) mainTitle.textContent = t("main-title");
   if (addBtn) addBtn.textContent = t("add-btn");
 
-  // Update status cards
   const statusCards = document.querySelectorAll(".status-card");
-  const statusLabels = [
-    "status-upcoming",
-    "status-overdue",
-    "status-completed",
-  ];
+  const statusLabels = ["status-upcoming", "status-overdue", "status-completed"];
   statusCards.forEach((card, i) => {
     const label = card.querySelector(".status-label");
-    if (label) label.textContent = t(statusLabels[i]);
+    if (label && statusLabels[i]) label.textContent = t(statusLabels[i]);
   });
 
-  // Update navigation buttons
   const navButtons = document.querySelectorAll(".view-button");
   const navKeys = ["nav-upcoming", "nav-completed", "nav-settings"];
   navButtons.forEach((btn, i) => {
-    btn.textContent = t(navKeys[i]);
+    if (navKeys[i]) btn.textContent = t(navKeys[i]);
   });
 
-  // Update panels
   const upcomingTitle = document.querySelector("#activePanel .panel-header h2");
   const upcomingDesc = document.querySelector("#activePanel .panel-header p");
   if (upcomingTitle) upcomingTitle.textContent = t("panel-upcoming-title");
@@ -411,7 +646,6 @@ function updateAllTranslations() {
   const historySearchInput = document.getElementById("historySearch");
   if (historySearchInput) historySearchInput.placeholder = t("search-history");
 
-  // Update delete controls
   const deleteTitle = document.querySelector(".delete-history-section h3");
   const deleteBtn = document.getElementById("deleteHistoryBtn");
   if (deleteTitle) deleteTitle.textContent = t("delete-history-title");
@@ -425,7 +659,6 @@ function updateAllTranslations() {
   if (confirmDeleteBtn) confirmDeleteBtn.textContent = t("delete-confirm-btn");
   if (cancelDeleteBtn) cancelDeleteBtn.textContent = t("delete-cancel-btn");
 
-  // Update filter options
   const filterOptions = document.querySelectorAll("#deleteFilter option");
   const filterKeys = [
     "filter-last-hour",
@@ -434,13 +667,10 @@ function updateAllTranslations() {
     "filter-all-time",
   ];
   filterOptions.forEach((option, i) => {
-    option.textContent = t(filterKeys[i]);
+    if (filterKeys[i]) option.textContent = t(filterKeys[i]);
   });
 
-  // Update settings panel
-  const settingsTitle = document.querySelector(
-    "#settingsPanel .panel-header h2",
-  );
+  const settingsTitle = document.querySelector("#settingsPanel .panel-header h2");
   const settingsDesc = document.querySelector("#settingsPanel .panel-header p");
   if (settingsTitle) settingsTitle.textContent = t("panel-settings-title");
   if (settingsDesc) settingsDesc.textContent = t("panel-settings-desc");
@@ -461,24 +691,30 @@ function updateAllTranslations() {
     if (btn.dataset.lang === "en") btn.textContent = t("lang-en");
     if (btn.dataset.lang === "uk") btn.textContent = t("lang-uk");
   });
+
+  const startupLabel = document.getElementById("startupLabel");
+  if (startupLabel) startupLabel.textContent = t("startup-label");
 }
 
 function updateAddModalTranslations() {
+  // Only meaningful in the add-reminder window; no-op on the main window so the
+  // shared lang-switch handler can call it unconditionally without clobbering
+  // the main header or throwing.
+  if (!document.getElementById("addForm")) return;
+
   const eyebrow = document.querySelector(".eyebrow");
   const title = document.querySelector("h1");
   if (eyebrow) eyebrow.textContent = t("add-modal-eyebrow");
   if (title) title.textContent = t("add-modal-title");
 
-  const labels = document.querySelectorAll("label");
-  const textLabel = labels[0];
-  const timeLabel = labels[1];
-  if (textLabel) textLabel.textContent = t("add-modal-text-label");
-  if (timeLabel) timeLabel.textContent = t("add-modal-time-label");
+  const labels = document.querySelectorAll("#addForm > label, .label-row label");
+  if (labels[0]) labels[0].textContent = t("add-modal-text-label");
+  if (labels[1]) labels[1].textContent = t("add-modal-time-label");
 
   const textInput = document.getElementById("text");
   if (textInput) textInput.placeholder = t("add-modal-text-placeholder");
 
-  const subLabels = document.querySelectorAll(".sub-label");
+  const subLabels = document.querySelectorAll(".datetime-label");
   const subLabelKeys = [
     "add-modal-year-label",
     "add-modal-month-label",
@@ -487,79 +723,14 @@ function updateAddModalTranslations() {
     "add-modal-minute-label",
   ];
   subLabels.forEach((label, i) => {
-    label.textContent = t(subLabelKeys[i]);
+    if (subLabelKeys[i]) label.textContent = t(subLabelKeys[i]);
   });
 
-  const submitBtn = document.querySelector(".primary-btn");
+  const submitBtn = document.querySelector("#addForm .primary-btn");
   if (submitBtn) submitBtn.textContent = t("add-modal-save-btn");
 
-  if (syncNowBtn) {
-    syncNowBtn.addEventListener("click", () => {
-      const now = new Date();
-
-      yearInput.value = now.getFullYear();
-      monthInput.value = String(now.getMonth() + 1).padStart(2, "0");
-      dayInput.value = String(now.getDate()).padStart(2, "0");
-      hourInput.value = String(now.getHours()).padStart(2, "0");
-      minuteInput.value = String(now.getMinutes()).padStart(2, "0");
-
-      updateDateDisplay();
-    });
-  }
-}
-
-async function loadAll() {
-  await loadActive();
-  await loadHistory();
-  await loadConfig();
-}
-
-let allReminders = [];
-let allHistory = [];
-let currentLang = localStorage.getItem("language") || "en";
-
-async function loadActiveFiltered(searchTerm = "") {
-  if (!activeList) return; // Guard against add-reminder window
-  allReminders = await electronAPI.getReminders();
-  const now = new Date();
-  const filtered = searchTerm
-    ? allReminders.filter((r) =>
-        r.text.toLowerCase().includes(searchTerm.toLowerCase()),
-      )
-    : allReminders;
-  const upcoming = filtered
-    .slice()
-    .sort((a, b) => new Date(a.time) - new Date(b.time));
-  activeList.innerHTML = "";
-  let overdue = 0;
-  let upcomingCountValue = 0;
-
-  upcoming.forEach((reminder) => {
-    const reminderTime = new Date(reminder.time);
-    if (reminderTime < now) overdue += 1;
-    else upcomingCountValue += 1;
-    activeList.appendChild(createCard(reminder, false));
-  });
-
-  if (overdueCount) overdueCount.textContent = overdue.toString();
-  if (upcomingCount) upcomingCount.textContent = upcomingCountValue.toString();
-}
-
-async function loadHistoryFiltered(searchTerm = "") {
-  if (!historyList) return; // Guard against add-reminder window
-  allHistory = await electronAPI.getHistory();
-  const filtered = searchTerm
-    ? allHistory.filter((r) =>
-        r.text.toLowerCase().includes(searchTerm.toLowerCase()),
-      )
-    : allHistory;
-  const completed = filtered.length;
-  if (completedCount) completedCount.textContent = completed.toString();
-  historyList.innerHTML = "";
-  filtered
-    .slice()
-    .sort((a, b) => new Date(b.completedAt) - new Date(a.completedAt))
-    .forEach((item) => historyList.appendChild(createCard(item, true)));
+  const syncBtn = document.getElementById("syncNowBtn");
+  if (syncBtn) syncBtn.textContent = t("add-modal-now-btn");
 }
 
 if (electronAPI.onRefreshReminders) {
@@ -620,9 +791,7 @@ if (document.getElementById("deleteHistoryBtn")) {
     }
 
     deleteConfirm.classList.add("hidden");
-    await loadHistoryFiltered(
-      document.getElementById("historySearch")?.value || "",
-    );
+    await loadHistoryFiltered(historySearchValue());
   });
 }
 
@@ -640,23 +809,26 @@ document.querySelectorAll(".lang-btn").forEach((btn) => {
     localStorage.setItem("language", currentLang);
     updateAllTranslations();
     updateAddModalTranslations();
+    // Re-render lists so already-rendered card text/labels relocalize.
+    loadActiveFiltered(activeSearchValue());
+    loadHistoryFiltered(historySearchValue());
   });
 });
 
-// Initialize translations on load
-if (document.readyState === "loading") {
-  document.addEventListener("DOMContentLoaded", () => {
-    updateAllTranslations();
+// Start-with-Windows toggle
+if (document.getElementById("loginToggle")) {
+  document.getElementById("loginToggle").addEventListener("change", async (e) => {
+    try {
+      await electronAPI.setLoginItem(e.target.checked);
+    } catch (error) {
+      console.error("setLoginItem failed", error);
+    }
   });
-} else {
-  updateAllTranslations();
 }
 
 viewButtons.forEach((button) => {
   button.addEventListener("click", () => setView(button.dataset.target));
 });
-
-setView("activePanel");
 
 if (document.getElementById("addBtn")) {
   document.getElementById("addBtn").addEventListener("click", async () => {
@@ -695,8 +867,6 @@ if (document.getElementById("openPathBtn")) {
 }
 
 if (document.getElementById("addForm")) {
-  const now = new Date();
-
   // Get input and dropdown elements
   const yearInput = document.getElementById("yearInput");
   const monthInput = document.getElementById("monthInput");
@@ -721,6 +891,8 @@ if (document.getElementById("addForm")) {
 
   const syncNowBtn = document.getElementById("syncNowBtn");
 
+  const now = new Date();
+
   // Set default values
   yearInput.value = now.getFullYear();
   monthInput.value = String(now.getMonth() + 1).padStart(2, "0");
@@ -728,52 +900,53 @@ if (document.getElementById("addForm")) {
   hourInput.value = "09";
   minuteInput.value = "00";
 
-  // Update day of week and month name display
+  // Update day-of-week and month-name hints, only for dates that actually exist
+  // (the multi-arg Date constructor silently rolls Feb 31 into March).
   function updateDateDisplay() {
     const year = parseInt(yearInput.value, 10);
     const month = parseInt(monthInput.value, 10);
     const day = parseInt(dayInput.value, 10);
     const testDate = new Date(year, month - 1, day);
-    if (
+    const valid =
       !isNaN(testDate.getTime()) &&
-      month >= 1 &&
-      month <= 12 &&
-      day >= 1 &&
-      day <= 31
-    ) {
-      const dayIndex = testDate.getDay();
-      const dayKeys = [
-        "day-sunday",
-        "day-monday",
-        "day-tuesday",
-        "day-wednesday",
-        "day-thursday",
-        "day-friday",
-        "day-saturday",
-      ];
-      if (dayOfWeekSpan) dayOfWeekSpan.textContent = t(dayKeys[dayIndex]);
+      testDate.getFullYear() === year &&
+      testDate.getMonth() === month - 1 &&
+      testDate.getDate() === day;
 
-      const monthIndex = month - 1;
-      const monthKeys = [
-        "month-january",
-        "month-february",
-        "month-march",
-        "month-april",
-        "month-may",
-        "month-june",
-        "month-july",
-        "month-august",
-        "month-september",
-        "month-october",
-        "month-november",
-        "month-december",
-      ];
-      if (monthOfYearSpan && monthIndex >= 0 && monthIndex < 12)
-        monthOfYearSpan.textContent = t(monthKeys[monthIndex]);
+    if (!valid) {
+      if (dayOfWeekSpan) dayOfWeekSpan.textContent = "";
+      if (monthOfYearSpan) monthOfYearSpan.textContent = "";
+      return;
     }
+
+    const dayKeys = [
+      "day-sunday",
+      "day-monday",
+      "day-tuesday",
+      "day-wednesday",
+      "day-thursday",
+      "day-friday",
+      "day-saturday",
+    ];
+    if (dayOfWeekSpan) dayOfWeekSpan.textContent = t(dayKeys[testDate.getDay()]);
+
+    const monthKeys = [
+      "month-january",
+      "month-february",
+      "month-march",
+      "month-april",
+      "month-may",
+      "month-june",
+      "month-july",
+      "month-august",
+      "month-september",
+      "month-october",
+      "month-november",
+      "month-december",
+    ];
+    if (monthOfYearSpan) monthOfYearSpan.textContent = t(monthKeys[month - 1]);
   }
 
-  // Helper to create and populate a dropdown
   function createDropdownOptions(
     dropdown,
     values,
@@ -789,44 +962,36 @@ if (document.getElementById("addForm")) {
     });
   }
 
-  // Populate year dropdown (current year ± 5-10)
+  // Year dropdown: current year through +10 (no past years offered).
   createDropdownOptions(
     yearDropdown,
-    Array.from({ length: 16 }, (_, i) => now.getFullYear() - 5 + i),
+    Array.from({ length: 11 }, (_, i) => now.getFullYear() + i),
   );
-
-  // Populate month dropdown
   createDropdownOptions(
     monthDropdown,
     Array.from({ length: 12 }, (_, i) => i + 1),
   );
-
-  // Populate day dropdown (1-31)
   createDropdownOptions(
     dayDropdown,
     Array.from({ length: 31 }, (_, i) => i + 1),
   );
-
-  // Populate hour dropdown (0-23)
   createDropdownOptions(
     hourDropdown,
     Array.from({ length: 24 }, (_, i) => i),
   );
-
-  // Populate minute dropdown (0-59, in 5-minute increments)
+  // Full 0-59 minute list so it matches the free-text input and Now button.
   createDropdownOptions(
     minuteDropdown,
-    Array.from({ length: 12 }, (_, i) => i * 5),
+    Array.from({ length: 60 }, (_, i) => i),
   );
 
-  // Helper to toggle dropdown and handle selection
-  function setupDropdown(button, dropdown, input, options) {
+  function setupDropdown(button, dropdown, input) {
     button.addEventListener("click", (e) => {
       e.preventDefault();
       dropdown.classList.toggle("open");
     });
 
-    dropdown.querySelectorAll(".datetime-option").forEach((optBtn, index) => {
+    dropdown.querySelectorAll(".datetime-option").forEach((optBtn) => {
       optBtn.addEventListener("click", (e) => {
         e.preventDefault();
         input.value = optBtn.textContent;
@@ -842,7 +1007,6 @@ if (document.getElementById("addForm")) {
   setupDropdown(hourBtn, hourDropdown, hourInput);
   setupDropdown(minuteBtn, minuteDropdown, minuteInput);
 
-  // Close dropdowns when clicking outside
   document.addEventListener("click", (e) => {
     if (!e.target.closest(".datetime-field")) {
       [
@@ -851,70 +1015,87 @@ if (document.getElementById("addForm")) {
         dayDropdown,
         hourDropdown,
         minuteDropdown,
-      ].forEach((d) => {
-        d.classList.remove("open");
-      });
+      ].forEach((d) => d.classList.remove("open"));
     }
   });
 
-  // Update day of week on input change
   [yearInput, monthInput, dayInput].forEach((input) => {
     input.addEventListener("input", updateDateDisplay);
   });
 
-  // Initial date display
+  // "Now" sets the next whole minute so the value is always clearly in the
+  // future and passes the submit-time guard.
+  if (syncNowBtn) {
+    syncNowBtn.addEventListener("click", (e) => {
+      e.preventDefault();
+      const soon = new Date();
+      soon.setSeconds(0, 0);
+      soon.setMinutes(soon.getMinutes() + 1);
+      yearInput.value = soon.getFullYear();
+      monthInput.value = String(soon.getMonth() + 1).padStart(2, "0");
+      dayInput.value = String(soon.getDate()).padStart(2, "0");
+      hourInput.value = String(soon.getHours()).padStart(2, "0");
+      minuteInput.value = String(soon.getMinutes()).padStart(2, "0");
+      updateDateDisplay();
+    });
+  }
+
   updateDateDisplay();
 
   document
     .getElementById("addForm")
     .addEventListener("submit", async (event) => {
       event.preventDefault();
+      const submitNow = new Date();
       const text = document.getElementById("text").value.trim();
 
       if (!text) {
-        alert("Please enter a reminder text.");
+        alert(t("alert-empty-text"));
         return;
       }
 
-      let year = parseInt(yearInput.value, 10);
-      let month = parseInt(monthInput.value, 10);
-      let day = parseInt(dayInput.value, 10);
-      let hour = parseInt(hourInput.value, 10);
-      let minute = parseInt(minuteInput.value, 10);
+      const year = parseInt(yearInput.value, 10);
+      const month = parseInt(monthInput.value, 10);
+      const day = parseInt(dayInput.value, 10);
+      const hour = parseInt(hourInput.value, 10);
+      const minute = parseInt(minuteInput.value, 10);
 
-      if (!year || year < 2026 || year > 2100) {
-        alert("Please enter a valid year (2026-2100).");
+      if (!year || year < submitNow.getFullYear() || year > 2100) {
+        alert(t("alert-invalid-year"));
         return;
       }
-
       if (!month || month < 1 || month > 12) {
-        alert("Please enter a valid month (1-12).");
+        alert(t("alert-invalid-month"));
         return;
       }
-
       if (!day || day < 1 || day > 31) {
-        alert("Please enter a valid day (1-31).");
+        alert(t("alert-invalid-day"));
         return;
       }
-
       if (isNaN(hour) || hour < 0 || hour > 23) {
-        alert("Please enter a valid hour (0-23).");
+        alert(t("alert-invalid-hour"));
         return;
       }
-
       if (isNaN(minute) || minute < 0 || minute > 59) {
-        alert("Please enter a valid minute (0-59).");
+        alert(t("alert-invalid-minute"));
         return;
       }
 
       const reminderDate = new Date(year, month - 1, day, hour, minute);
-      if (isNaN(reminderDate.getTime())) {
-        alert("Please enter a valid date.");
+      // Reject impossible dates (e.g. Feb 31) which the Date constructor would
+      // otherwise silently roll over into the next month.
+      if (
+        isNaN(reminderDate.getTime()) ||
+        reminderDate.getFullYear() !== year ||
+        reminderDate.getMonth() !== month - 1 ||
+        reminderDate.getDate() !== day
+      ) {
+        alert(t("alert-invalid-date"));
         return;
       }
 
-      if (reminderDate <= now) {
-        alert("Reminder time must be in the future.");
+      if (reminderDate <= submitNow) {
+        alert(t("alert-past-time"));
         return;
       }
 
@@ -927,19 +1108,14 @@ if (document.getElementById("addForm")) {
         window.close();
       } catch (error) {
         console.error("addReminder failed", error);
-        alert("Unable to save reminder. Please try again.");
+        alert(t("alert-save-failed"));
       }
     });
 }
 
-if (
-  document.getElementById("remindersList") ||
-  document.getElementById("activeList")
-) {
-  loadAll();
-  updateAllTranslations();
-}
-
-if (document.getElementById("addForm")) {
-  updateAddModalTranslations();
+// Initial render
+updateAllTranslations();
+updateAddModalTranslations();
+if (activeList) {
+  setView("activePanel");
 }

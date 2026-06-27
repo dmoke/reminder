@@ -3,12 +3,26 @@
   "version": "1.0.0",
   "description": "Windows tray-based reminders app",
   "main": "app/main.js",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/dmoke/reminder.git"
+  },
+  "homepage": "https://github.com/dmoke/reminder#readme",
+  "bugs": {
+    "url": "https://github.com/dmoke/reminder/issues"
+  },
   "scripts": {
     "start": "electron . --enable-logging",
     "build": "electron-builder",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "node --test"
   },
-  "keywords": [],
+  "keywords": [
+    "electron",
+    "reminders",
+    "tray",
+    "windows",
+    "desktop"
+  ],
   "author": "",
   "license": "ISC",
   "type": "commonjs",
@@ -23,13 +37,35 @@
     "appId": "com.reminder.app",
     "productName": "Reminders",
     "icon": "app/assets/icon.ico",
+    "files": [
+      "app/**/*",
+      "ui/**/*",
+      "package.json"
+    ],
     "directories": {
       "output": "dist"
     },
     "win": {
       "target": "nsis",
       "icon": "app/assets/icon.ico",
+      "artifactName": "Reminders-Setup-${version}.${ext}",
       "signAndEditExecutable": false
-    }
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Reminders"
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "dmoke",
+        "repo": "reminder",
+        "releaseType": "release"
+      }
+    ]
   }
 }
