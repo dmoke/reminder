@@ -5,6 +5,7 @@ const {
   ipcMain,
   shell,
   session,
+  screen,
 } = require("electron");
 const path = require("path");
 const fs = require("fs");
@@ -27,10 +28,29 @@ const CSP =
 const DISMISS_SNOOZE_MS = 5 * 60 * 1000;
 const RAISE_THROTTLE_MS = 20 * 1000;
 // The main window auto-fits its height to the reminder list: it shrinks down to
-// roughly the page chrome when nearly empty and grows up to this cap, after
-// which the list scrolls internally. (Renderer mirrors WIN_MAX_HEIGHT.)
-const WIN_MAX_HEIGHT = 920;
+// roughly the page chrome when nearly empty and grows up to a per-display cap
+// (mainWindowMaxHeight, chosen on launch), after which the list scrolls
+// internally. (Renderer mirrors the cap via getLayoutMetrics.)
+const WIN_MAX_HEIGHT = 920; // desktop design height; fallback if display probing fails
 const WIN_MIN_HEIGHT = 360;
+const DESIGN_WIDTH = 1140; // window width on a roomy display
+const DESIGN_MIN_WIDTH = 1020;
+
+// ---- Adaptive scaling ------------------------------------------------------
+// On launch the whole UI is scaled (Electron content zoom) to the monitor so it
+// fits comfortably on small laptops instead of rendering at a fixed desktop
+// size. The zoom is picked so the tallest view — the month calendar — fits the
+// display's work area without scrolling. REFERENCE_CONTENT_HEIGHT is the CSS-px
+// content height we reserve for that calendar view (CSS px are zoom invariant).
+// The grid is always 6 week-rows, but a day cell grows with up to 3 event pills,
+// so the real height ranges ~1100 (light month) to ~1330 (every row packed). We
+// reserve enough for light-through-busy months to fit with no scroll; an
+// exceptionally packed month falls back to a small page scroll.
+const REFERENCE_CONTENT_HEIGHT = 1180;
+const WORK_AREA_MARGIN = 24; // gap kept between the window and the work-area edges
+const MIN_ZOOM = 0.5; // never shrink the UI past this (keeps text legible)
+const MAX_ZOOM = 1.0; // never enlarge past the native design size
+const APPROX_FRAME = 44; // title bar + borders estimate, used only for the first paint
 
 // User-facing strings for the alert window (the main process owns this window,
 // so it localizes it directly from the persisted language preference).
@@ -93,6 +113,9 @@ process.on("unhandledRejection", (reason) => {
 });
 let tray = null;
 let mainWindow = null;
+let mainWindowZoom = 1; // content zoom factor chosen for the current display
+let mainWindowMaxHeight = WIN_MAX_HEIGHT; // auto-fit growth cap (DIP) for this display
+let mainWindowDisplayId = null; // id of the display the window was last sized for
 let alertWindow = null;
 let alertReady = false;
 let storage = null;
@@ -149,28 +172,121 @@ function hardenWebContents(win) {
   });
 }
 
+function clampZoom(z) {
+  return Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, z));
+}
+
+// The display the app is opening on — the one under the cursor, falling back to
+// the primary display.
+function targetDisplay() {
+  try {
+    return screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
+  } catch (err) {
+    console.error("display probe failed; using primary", err);
+    return screen.getPrimaryDisplay();
+  }
+}
+
+// True if the window's center sits within some display's work area (i.e. it
+// isn't stranded off-screen after a monitor was unplugged).
+function isWindowVisibleOnScreen(win) {
+  const b = win.getBounds();
+  const cx = b.x + Math.round(b.width / 2);
+  const cy = b.y + Math.round(b.height / 2);
+  return screen.getAllDisplays().some((d) => {
+    const a = d.workArea;
+    return cx >= a.x && cx < a.x + a.width && cy >= a.y && cy < a.y + a.height;
+  });
+}
+
+// Measure the real OS frame, scale the UI so the calendar's reference content
+// fits the current display's work area, and size + center the window to that
+// scaled content. Records the display it was tuned for so reopening on another
+// monitor can detect the change and re-fit. Does NOT apply the zoom to the
+// renderer — callers do that at the right moment (after load, or immediately on
+// reopen).
+function applyWindowLayout(win) {
+  const display = targetDisplay();
+  const wa = display.workArea;
+  const budgetH = Math.max(WIN_MIN_HEIGHT, wa.height - WORK_AREA_MARGIN);
+  const maxWidth = Math.max(480, wa.width - WORK_AREA_MARGIN);
+  const width = Math.min(DESIGN_WIDTH, maxWidth);
+  const [, totalProbe] = win.getSize();
+  const [, contentProbe] = win.getContentSize();
+  const frame = Math.max(0, totalProbe - contentProbe);
+  const availContent = Math.max(1, budgetH - frame);
+  const zoom = clampZoom(availContent / REFERENCE_CONTENT_HEIGHT);
+  const contentDip = Math.min(
+    availContent,
+    Math.round(REFERENCE_CONTENT_HEIGHT * zoom),
+  );
+  const totalH = contentDip + frame;
+  mainWindowZoom = zoom;
+  mainWindowMaxHeight = totalH;
+  mainWindowDisplayId = display.id;
+  win.setSize(width, totalH, false);
+  win.setPosition(
+    Math.round(wa.x + (wa.width - width) / 2),
+    Math.round(wa.y + (wa.height - totalH) / 2),
+  );
+}
+
 function openMainWindow() {
   if (mainWindow) {
+    // Closing only hides the window (the tray app keeps running), so reopening
+    // reuses it. If the active monitor changed since we last sized it (e.g. the
+    // laptop was undocked) or it would surface off-screen, re-fit to the current
+    // display; otherwise leave the user's size/position alone.
+    if (
+      targetDisplay().id !== mainWindowDisplayId ||
+      !isWindowVisibleOnScreen(mainWindow)
+    ) {
+      applyWindowLayout(mainWindow);
+      mainWindow.webContents.setZoomFactor(mainWindowZoom);
+      mainWindow.webContents.send("layout-changed");
+    }
     if (mainWindow.isMinimized()) mainWindow.restore();
     mainWindow.show();
     mainWindow.focus();
     return;
   }
+  const display = targetDisplay();
+  const wa = display.workArea;
+  const budgetH = Math.max(WIN_MIN_HEIGHT, wa.height - WORK_AREA_MARGIN);
+  const maxWidth = Math.max(480, wa.width - WORK_AREA_MARGIN);
+  const width = Math.min(DESIGN_WIDTH, maxWidth);
+
   mainWindow = new BrowserWindow({
-    width: 1140,
-    height: WIN_MAX_HEIGHT,
-    minWidth: 1020,
-    minHeight: WIN_MIN_HEIGHT,
+    width,
+    height: budgetH,
+    minWidth: Math.min(DESIGN_MIN_WIDTH, maxWidth),
+    minHeight: Math.min(WIN_MIN_HEIGHT, budgetH),
     icon: appIcon,
+    // Hide Electron's default File/Edit/View menu bar — a tray app has no use for
+    // it, it wastes ~26px of height, and it skews the content-frame measurement.
+    // Alt still reveals it, so edit accelerators remain available.
+    autoHideMenuBar: true,
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
       nodeIntegration: false,
+      // Rough scale for the first paint; applyWindowLayout sets the exact value
+      // once the real window frame is known (reasserted on the renderer after load).
+      zoomFactor: clampZoom((budgetH - APPROX_FRAME) / REFERENCE_CONTENT_HEIGHT),
     },
   });
 
+  applyWindowLayout(mainWindow);
+
   hardenWebContents(mainWindow);
   mainWindow.loadFile(path.join(__dirname, "..", "ui", "index.html"));
+  // Reassert the content zoom after load — some Electron builds reset the
+  // webPreferences zoomFactor once the page finishes navigating.
+  mainWindow.webContents.on("did-finish-load", () => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.setZoomFactor(mainWindowZoom);
+    }
+  });
   if (!app.isPackaged) {
     mainWindow.webContents.openDevTools({ mode: "detach" });
   }
@@ -242,6 +358,7 @@ function ensureAlertWindow() {
     icon: appIcon,
     show: false,
     title: "Reminder",
+    autoHideMenuBar: true, // no default menu bar on the notification popup
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
@@ -465,16 +582,37 @@ ipcMain.handle("get-reminders", () => storage.getActive());
 ipcMain.handle("get-history", () => storage.getHistory());
 // Renderer asks the window to match its content height; we clamp to the window
 // min/max and translate the content height into a total (frame-inclusive) size.
+// The renderer measures in CSS px (post-zoom), so scale back to the window's
+// device-independent px before sizing.
 ipcMain.handle("fit-window-height", (event, contentHeight) => {
   if (!mainWindow || mainWindow.isDestroyed()) return;
   if (mainWindow.isMaximized() || mainWindow.isFullScreen()) return;
-  const h = Math.round(Number(contentHeight));
-  if (!Number.isFinite(h) || h <= 0) return;
+  const css = Number(contentHeight);
+  if (!Number.isFinite(css) || css <= 0) return;
   const [w, totalH] = mainWindow.getSize();
   const [, contentH] = mainWindow.getContentSize();
-  const frame = totalH - contentH; // title bar + borders
-  const target = Math.max(WIN_MIN_HEIGHT, Math.min(WIN_MAX_HEIGHT, h + frame));
+  const frame = totalH - contentH; // title bar + borders (DIP)
+  const contentDip = Math.round(css * mainWindowZoom);
+  const target = Math.max(
+    WIN_MIN_HEIGHT,
+    Math.min(mainWindowMaxHeight, contentDip + frame),
+  );
   if (Math.abs(target - totalH) > 1) mainWindow.setSize(w, target, false);
+});
+// The renderer mirrors the window's content-height cap (CSS px) and the launch
+// zoom so its auto-fit math matches the per-display window size chosen above.
+ipcMain.handle("get-layout-metrics", () => {
+  let frame = APPROX_FRAME;
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    const [, totalH] = mainWindow.getSize();
+    const [, contentH] = mainWindow.getContentSize();
+    frame = Math.max(0, totalH - contentH);
+  }
+  const maxContentDip = Math.max(0, mainWindowMaxHeight - frame);
+  return {
+    zoomFactor: mainWindowZoom,
+    maxContentHeight: Math.round(maxContentDip / mainWindowZoom),
+  };
 });
 ipcMain.handle("add-reminder", (event, reminder) => {
   const clean = sanitizeNewReminder(reminder);

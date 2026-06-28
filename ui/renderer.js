@@ -21,6 +21,8 @@ if (!electronAPI) {
     onOpenEditModal: () => {},
     alertEditDone: async () => {},
     fitWindowHeight: () => {},
+    getLayoutMetrics: async () => ({ zoomFactor: 1, maxContentHeight: 920 }),
+    onLayoutChanged: () => {},
   };
 }
 
@@ -966,10 +968,15 @@ function createCard(reminder, isHistory) {
 
 // --- window auto-fit --------------------------------------------------------
 // The window grows/shrinks to fit the current list: short when there are only a
-// few reminders (down to just the page chrome), capped at WIN_MAX_HEIGHT. Once
-// the content would exceed the cap, the window stays put and the list itself
-// scrolls (with a faded bottom edge — the `.is-capped` modifier).
-const WIN_MAX_HEIGHT = 920; // keep in sync with main.js
+// few reminders (down to just the page chrome), capped at the window's max
+// content height. Once the content would exceed the cap, the window stays put
+// and the list itself scrolls (with a faded bottom edge — `.is-capped`).
+//
+// `maxContentHeight` (CSS px) is the cap the window can grow to on this display.
+// The main process derives it from the monitor's work area + the launch zoom and
+// hands it over via getLayoutMetrics(); until then we use a generous default so
+// early layout passes don't over-shrink the window.
+let maxContentHeight = 920;
 const MIN_LIST_HEIGHT = 96; // never collapse the list below this when capped
 // Stays false until the first real data load, so the early (empty-list) layout
 // passes only cap the list and don't shrink the window before content exists.
@@ -988,11 +995,6 @@ function visiblePanelList() {
 function shellVMargin(shell) {
   const cs = getComputedStyle(shell);
   return (parseFloat(cs.marginTop) || 0) + (parseFloat(cs.marginBottom) || 0);
-}
-
-// Pixels the OS frame (title bar + borders) adds on top of the content area.
-function frameHeight() {
-  return Math.max(0, (window.outerHeight || 0) - (window.innerHeight || 0));
 }
 
 // `scrollHeight` reports a list's full content height even while it's capped, so
@@ -1046,7 +1048,7 @@ function relayout() {
   ) {
     return;
   }
-  const maxContent = WIN_MAX_HEIGHT - frameHeight();
+  const maxContent = maxContentHeight;
   const list = visiblePanelList();
   const hasList = list && list.offsetParent;
   const chrome = hasList ? chromeHeight(shell, list) : 0;
@@ -1254,6 +1256,20 @@ function updateHistSelectionUI() {
     const picked = visible.filter((id) => historySelection.has(id)).length;
     all.checked = visible.length > 0 && picked === visible.length;
     all.indeterminate = picked > 0 && picked < visible.length;
+  }
+}
+
+// Pull the window's content-height cap (CSS px) from the main process, which
+// derives it from the monitor's work area and the launch zoom. Used by the
+// auto-fit so the renderer's cap matches the per-display window size.
+async function loadLayoutMetrics() {
+  try {
+    const m = await electronAPI.getLayoutMetrics?.();
+    if (m && Number.isFinite(m.maxContentHeight) && m.maxContentHeight > 0) {
+      maxContentHeight = m.maxContentHeight;
+    }
+  } catch (err) {
+    console.error("getLayoutMetrics failed", err);
   }
 }
 
@@ -2035,6 +2051,14 @@ function updateAllTranslations() {
 if (electronAPI.onRefreshReminders) {
   electronAPI.onRefreshReminders(() => reload());
 }
+// The window was re-fitted to a different monitor (e.g. undocked) — pull the new
+// size cap + zoom and re-run the auto-fit so the layout matches the new display.
+if (electronAPI.onLayoutChanged) {
+  electronAPI.onLayoutChanged(async () => {
+    await loadLayoutMetrics();
+    relayout();
+  });
+}
 if (electronAPI.onOpenAddModal) {
   electronAPI.onOpenAddModal(() => openModal("create"));
 }
@@ -2192,6 +2216,14 @@ document.querySelectorAll(".lang-btn").forEach((btn) => {
     reload();
   });
 });
+
+// Reconcile language on boot. The renderer's language lives in localStorage,
+// but the always-on-top alert window is localized by the main process from
+// config.json. Those two stores only sync when a language button is clicked,
+// so they can drift (e.g. localStorage set before config.json carried a
+// language) and leave the alert in the wrong language. Push the persisted
+// choice to the main process once at startup so the alert always matches the UI.
+electronAPI.setLanguage(currentLang);
 
 // Login item
 document.getElementById("loginToggle")?.addEventListener("change", async (e) => {
@@ -2356,4 +2388,6 @@ setInterval(() => {
 
 applyViewMode();
 updateAllTranslations();
-setView("activePanel");
+// Fetch the display-derived size cap before the first layout pass so the window
+// auto-fits to this monitor from the start.
+loadLayoutMetrics().finally(() => setView("activePanel"));

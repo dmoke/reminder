@@ -14,6 +14,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
   deleteReminder: (id) => ipcRenderer.invoke("delete-reminder", id),
   deleteTag: (tag) => ipcRenderer.invoke("delete-tag", tag),
   fitWindowHeight: (h) => ipcRenderer.invoke("fit-window-height", h),
+  getLayoutMetrics: () => ipcRenderer.invoke("get-layout-metrics"),
+  onLayoutChanged: (callback) => ipcRenderer.on("layout-changed", callback),
   openAddWindow: () => ipcRenderer.invoke("open-add-window"),
   getConfig: () => ipcRenderer.invoke("get-config"),
   chooseFolder: () => ipcRenderer.invoke("choose-folder"),
