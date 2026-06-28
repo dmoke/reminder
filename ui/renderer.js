@@ -1441,10 +1441,10 @@ function buildDtMenus() {
 }
 
 // Big presets: pick the day, keep whatever time-of-day is already chosen.
-function applyQuickDay(kind) {
-  const cur = readModalDate();
-  const h = isNaN(cur.getTime()) ? 9 : cur.getHours();
-  const m = isNaN(cur.getTime()) ? 0 : cur.getMinutes();
+// Target calendar day a quick-day preset jumps to (time-of-day stripped).
+// Shared by applyQuickDay and the button labels so the displayed day number
+// always matches the day the click will choose.
+function quickDayDate(kind) {
   const d = new Date();
   d.setSeconds(0, 0);
   if (kind === "tomorrow") {
@@ -1458,6 +1458,14 @@ function applyQuickDay(kind) {
     if (add === 0) add = 7;
     d.setDate(d.getDate() + add);
   }
+  return d;
+}
+
+function applyQuickDay(kind) {
+  const cur = readModalDate();
+  const h = isNaN(cur.getTime()) ? 9 : cur.getHours();
+  const m = isNaN(cur.getTime()) ? 0 : cur.getMinutes();
+  const d = quickDayDate(kind);
   d.setHours(h, m, 0, 0);
   // "Later today" with a time already in the past → bump to the next hour.
   if (kind === "today" && d <= new Date()) {
@@ -1489,7 +1497,11 @@ function buildQuickOptions() {
     const btn = document.createElement("button");
     btn.type = "button";
     btn.className = "quick-day";
-    btn.textContent = t(key);
+    const dayNum = document.createElement("span");
+    dayNum.className = "quick-day-num";
+    dayNum.textContent = String(quickDayDate(kind).getDate()).padStart(2, "0");
+    btn.appendChild(dayNum);
+    btn.appendChild(document.createTextNode(t(key)));
     btn.addEventListener("click", () => applyQuickDay(kind));
     wrap.appendChild(btn);
   });

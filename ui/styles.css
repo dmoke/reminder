@@ -1729,6 +1729,17 @@ select {
   background: #eff6ff;
   transform: translateY(-1px);
 }
+/* Day-of-month badge that prefixes each quick-day title. */
+.quick-day-num {
+  display: inline-block;
+  margin-right: 6px;
+  padding: 1px 5px;
+  border-radius: 6px;
+  background: #5bb55a;
+  color: #fff;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+}
 /* Short time-of-day chips stay a single flexible row. */
 .quick-row--time {
   display: flex;
