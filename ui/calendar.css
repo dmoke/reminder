@@ -1,0 +1,298 @@
+/* ============================================================
+ * MODULE B — Calendar month view styles (.cal-* prefix)
+ * Vanilla CSS, no deps. Matches the app's rounded/soft aesthetic:
+ *   surfaces #ffffff / #f8fafc, text #111827 / #475569,
+ *   muted #6b7280 / #94a3b8, subtle borders rgba(148,163,184,...),
+ *   accents: green #166534/#22c55e, red #b91c1c, blue #1d4ed8.
+ * ============================================================ */
+
+.cal-root {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  gap: 16px;
+  color: #111827;
+}
+
+/* ---- Header: nav + month label + Today ---- */
+.cal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.cal-nav-group {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.cal-month-label {
+  font-size: 1.2rem;
+  font-weight: 700;
+  color: #111827;
+  min-width: 160px;
+  text-align: center;
+  text-transform: capitalize;
+}
+
+.cal-nav-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  padding: 0;
+  font-size: 0.9rem;
+  background: #f8fafc;
+  color: #334155;
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  border-radius: 14px;
+  cursor: pointer;
+  transition:
+    transform 0.15s ease,
+    background 0.15s ease;
+}
+
+.cal-nav-btn:hover {
+  background: #eef2f7;
+  transform: translateY(-1px);
+}
+
+.cal-today-btn {
+  padding: 10px 18px;
+  font-weight: 600;
+  background: #f8fafc;
+  color: #111827;
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  border-radius: 14px;
+  cursor: pointer;
+  transition:
+    transform 0.15s ease,
+    background 0.15s ease;
+}
+
+.cal-today-btn:hover {
+  background: #eef2f7;
+  transform: translateY(-1px);
+}
+
+/* ---- Grid container ---- */
+.cal-grid {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  background: #ffffff;
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  border-radius: 24px;
+  box-shadow: 0 18px 40px rgba(15, 23, 42, 0.06);
+  overflow: hidden;
+}
+
+/* ---- Weekday header ---- */
+.cal-weekday-row {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  background: #f8fafc;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.16);
+}
+
+.cal-weekday {
+  padding: 12px 8px;
+  text-align: center;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #6b7280;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+/* ---- Weeks / cells ---- */
+.cal-weeks {
+  display: flex;
+  flex-direction: column;
+}
+
+.cal-week {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+}
+
+.cal-day {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-height: 104px;
+  min-width: 0; /* allow pill text to truncate inside grid columns */
+  padding: 8px 8px 10px;
+  border-right: 1px solid rgba(148, 163, 184, 0.12);
+  border-bottom: 1px solid rgba(148, 163, 184, 0.12);
+  background: #ffffff;
+  cursor: pointer;
+  transition: background 0.12s ease;
+  overflow: hidden;
+}
+
+.cal-week:last-child .cal-day {
+  border-bottom: none;
+}
+
+.cal-day:nth-child(7n) {
+  border-right: none;
+}
+
+.cal-day:hover {
+  background: #f8fafc;
+}
+
+.cal-day--adjacent {
+  background: #fbfcfe;
+}
+
+.cal-day--adjacent .cal-day-number {
+  color: #cbd5e1;
+}
+
+.cal-day--adjacent:hover {
+  background: #f3f5f9;
+}
+
+.cal-day-number {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #475569;
+  line-height: 1.4;
+  align-self: flex-start;
+}
+
+.cal-day--today .cal-day-number {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 26px;
+  height: 26px;
+  padding: 0 6px;
+  color: #ffffff;
+  background: linear-gradient(135deg, #111827 0%, #0f172a 100%);
+  border-radius: 999px;
+  box-shadow: 0 6px 14px rgba(15, 23, 42, 0.18);
+}
+
+.cal-day--today {
+  background: #f5f8ff;
+}
+
+/* ---- Pills ---- */
+.cal-pills {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.cal-pill {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-width: 0;
+  padding: 4px 8px;
+  font-size: 0.76rem;
+  font-weight: 600;
+  text-align: left;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition:
+    transform 0.12s ease,
+    filter 0.12s ease;
+}
+
+.cal-pill:hover {
+  transform: translateY(-1px);
+  filter: brightness(0.98);
+}
+
+.cal-pill-time {
+  flex: 0 0 auto;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.85;
+}
+
+.cal-pill-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cal-pill-fav {
+  flex: 0 0 auto;
+  font-size: 0.7rem;
+  line-height: 1;
+  opacity: 0.9;
+}
+
+/* State colors (match app accents) */
+.cal-pill--overdue {
+  background: rgba(239, 68, 68, 0.12);
+  color: #b91c1c;
+  border-color: rgba(239, 68, 68, 0.18);
+}
+
+.cal-pill--upcoming {
+  background: rgba(34, 197, 94, 0.14);
+  color: #166534;
+  border-color: rgba(34, 197, 94, 0.2);
+}
+
+.cal-pill--done {
+  background: rgba(59, 130, 246, 0.1);
+  color: #1d4ed8;
+  border-color: rgba(59, 130, 246, 0.16);
+}
+
+.cal-pill--done .cal-pill-text {
+  text-decoration: line-through;
+  opacity: 0.85;
+}
+
+/* ---- "+N more" overflow ---- */
+.cal-more {
+  padding: 2px 8px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: #6b7280;
+  cursor: pointer;
+  border-radius: 999px;
+}
+
+.cal-more:hover {
+  color: #111827;
+  background: rgba(148, 163, 184, 0.14);
+}
+
+/* ---- Responsive: shrink cells gracefully on narrow widths ---- */
+@media (max-width: 760px) {
+  .cal-day {
+    min-height: 78px;
+    padding: 6px 5px 8px;
+  }
+
+  .cal-pill {
+    padding: 3px 6px;
+    font-size: 0.7rem;
+  }
+
+  .cal-pill-time {
+    display: none; /* save space on small screens */
+  }
+
+  .cal-month-label {
+    min-width: 0;
+    font-size: 1.05rem;
+  }
+}

@@ -1,20 +1,18 @@
-const { Notification, nativeImage } = require("electron");
-const path = require("path");
+// Polls active reminders once per second and reports the set that is currently
+// "due" (overdue and not done) to a callback. The main process turns that set
+// into an always-on-top alert window. No Electron dependency here, so this is
+// unit-testable under plain `node --test`.
 
 class Scheduler {
-  constructor(storage) {
+  constructor(storage, onDue) {
     this.storage = storage;
+    this.onDue = typeof onDue === "function" ? onDue : () => {};
     this.interval = null;
-    // Reminders that have already been notified this session. We never re-fire
-    // a notification for the same reminder until it is acted on (completed /
-    // snoozed), which moves it out of the active set or into the future.
-    this.pending = new Set();
   }
 
   start() {
-    this.interval = setInterval(() => {
-      this.checkReminders();
-    }, 1000);
+    this.interval = setInterval(() => this.tick(), 1000);
+    this.tick(); // fire immediately so missed reminders surface at launch
   }
 
   stop() {
@@ -24,69 +22,22 @@ class Scheduler {
     }
   }
 
-  checkReminders() {
-    const now = new Date();
-    const active = this.storage.getActive();
-
-    // Self-heal the suppression set: re-arm any reminder that was rescheduled
-    // into the future (snoozed/edited from the main window, which never touches
-    // this Set) or that no longer exists (deleted/archived). Without this, a
-    // fired-but-ignored reminder would stay suppressed for the whole session.
-    if (this.pending.size) {
-      const byId = new Map(active.map((r) => [r.id, r]));
-      for (const id of this.pending) {
-        const reminder = byId.get(id);
-        if (!reminder) {
-          this.pending.delete(id);
-          continue;
-        }
-        const time = new Date(reminder.time);
-        if (!isNaN(time.getTime()) && time > now) {
-          this.pending.delete(id);
-        }
-      }
-    }
-
-    active.forEach((reminder) => {
-      if (reminder.done) return;
-      if (this.pending.has(reminder.id)) return;
+  getDue(now = new Date()) {
+    return this.storage.getActive().filter((reminder) => {
+      if (reminder.done) return false;
       const time = new Date(reminder.time);
-      if (!isNaN(time.getTime()) && time <= now) {
-        this.triggerReminder(reminder);
-      }
+      return !isNaN(time.getTime()) && time <= now;
     });
   }
 
-  triggerReminder(reminder) {
-    this.pending.add(reminder.id);
-    const image = nativeImage.createFromPath(
-      path.join(__dirname, "assets", "icon.ico"),
-    );
-    const notification = new Notification({
-      title: "Reminder",
-      body: reminder.text,
-      ...(image && !image.isEmpty() ? { icon: image } : {}),
-      actions: [
-        { type: "button", text: "Complete" },
-        { type: "button", text: "Snooze 10 min" },
-      ],
-    });
-
-    notification.on("action", (event, index) => {
-      if (index === 0) {
-        // Complete: archive the reminder
-        this.storage.archive(reminder.id);
-      } else {
-        // Snooze: reschedule for 10 minutes from now
-        const snoozeTime = new Date(Date.now() + 10 * 60 * 1000);
-        this.storage.update(reminder.id, { time: snoozeTime.toISOString() });
-      }
-      // Acting on the reminder removes it from the active set or pushes it into
-      // the future, so allow it to be tracked again from a clean slate.
-      this.pending.delete(reminder.id);
-    });
-
-    notification.show();
+  tick() {
+    // A throw here (e.g. inside an Electron call in the onDue handler) must not
+    // kill the per-second interval or escape as an uncaught exception.
+    try {
+      this.onDue(this.getDue());
+    } catch (err) {
+      console.error("scheduler tick failed:", err);
+    }
   }
 }
 

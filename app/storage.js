@@ -96,6 +96,24 @@ class Storage {
     this.notify();
     return true;
   }
+
+  // Complete one occurrence of a recurring reminder: push a completed snapshot
+  // to history AND advance the still-active reminder to its next occurrence.
+  recurComplete(id, nextTime) {
+    const index = this.active.findIndex((r) => r.id === id);
+    if (index === -1) return false;
+    const snapshot = Object.assign({}, this.active[index], {
+      done: true,
+      completedAt: new Date().toISOString(),
+    });
+    const history = this.getHistory();
+    history.unshift(snapshot);
+    this.active[index].time = nextTime;
+    this.writeFile(this.activePath, this.active);
+    this.writeFile(this.historyPath, history);
+    this.notify();
+    return true;
+  }
 }
 
 module.exports = Storage;

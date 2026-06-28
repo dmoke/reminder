@@ -8,6 +8,7 @@
       content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline';"
     />
     <link rel="stylesheet" href="styles.css" />
+    <link rel="stylesheet" href="calendar.css" />
   </head>
   <body>
     <div class="page-shell">
@@ -38,12 +39,9 @@
         <button class="view-button active" data-target="activePanel">
           Upcoming
         </button>
-        <button class="view-button" data-target="historyPanel">
-          Completed
-        </button>
-        <button class="view-button" data-target="settingsPanel">
-          Settings
-        </button>
+        <button class="view-button" data-target="calendarPanel">Calendar</button>
+        <button class="view-button" data-target="historyPanel">Completed</button>
+        <button class="view-button" data-target="settingsPanel">Settings</button>
       </nav>
 
       <section class="panel" id="activePanel">
@@ -51,13 +49,41 @@
           <h2>Planned reminders</h2>
           <p>Manage your upcoming tasks and reschedule quickly.</p>
         </div>
-        <input
-          type="text"
-          id="activeSearch"
-          class="search-input"
-          placeholder="Search reminders..."
-        />
+        <div class="list-toolbar">
+          <input
+            type="text"
+            id="activeSearch"
+            class="search-input"
+            placeholder="Search reminders..."
+          />
+          <select id="tagFilter" class="filter-select">
+            <option value="">All tags</option>
+          </select>
+          <button id="favFilterBtn" class="filter-toggle" data-active="false">
+            ★ Favorites
+          </button>
+          <div class="view-toggle" role="group">
+            <button class="view-toggle-btn" id="viewListBtn" data-view="list">
+              ☰ List
+            </button>
+            <button
+              class="view-toggle-btn active"
+              id="viewGridBtn"
+              data-view="grid"
+            >
+              ▦ Grid
+            </button>
+          </div>
+        </div>
         <div id="activeList" class="list-grid"></div>
+      </section>
+
+      <section class="panel hidden" id="calendarPanel">
+        <div class="panel-header">
+          <h2>Calendar</h2>
+          <p>See everything you have planned at a glance.</p>
+        </div>
+        <div id="calendarContainer"></div>
       </section>
 
       <section class="panel hidden" id="historyPanel">
@@ -75,7 +101,7 @@
               <option value="allTime">All time</option>
             </select>
             <button id="deleteHistoryBtn" class="delete-btn">
-              Delete selected
+              Delete in range
             </button>
           </div>
           <div id="deleteConfirm" class="delete-confirm hidden">
@@ -132,6 +158,47 @@
         </div>
       </section>
     </div>
+
+    <!-- Add / Edit / Duplicate modal -->
+    <div id="reminderModal" class="modal-overlay hidden">
+      <div class="modal modal--form">
+        <h2 id="modalTitle">Add reminder</h2>
+
+        <label id="modalTextLabel" for="modalText">Reminder text</label>
+        <input type="text" id="modalText" placeholder="Reminder text" />
+
+        <label id="modalWhenLabel" for="modalTime">Date &amp; time</label>
+        <input type="datetime-local" id="modalTime" />
+        <div class="quick-options" id="quickOptions"></div>
+        <div class="quick-options" id="timeOptions"></div>
+
+        <label id="modalRepeatLabel" for="modalRecurrence">Repeat</label>
+        <select id="modalRecurrence" class="filter-select">
+          <option value="none">Does not repeat</option>
+          <option value="daily">Daily</option>
+          <option value="weekdays">Every weekday</option>
+          <option value="weekly">Weekly</option>
+          <option value="monthly">Monthly</option>
+          <option value="yearly">Yearly</option>
+        </select>
+
+        <label id="modalTagsLabel" for="modalTags">Tags (comma separated)</label>
+        <input type="text" id="modalTags" placeholder="work, home, urgent" />
+
+        <label class="modal-check">
+          <input type="checkbox" id="modalFavorite" />
+          <span id="modalFavoriteLabel">Mark as favorite</span>
+        </label>
+
+        <p class="modal-error" id="modalError"></p>
+        <div class="modal-actions">
+          <button class="secondary-btn" id="modalCancel">Cancel</button>
+          <button class="primary-btn" id="modalSave">Save</button>
+        </div>
+      </div>
+    </div>
+
+    <script src="calendar.js"></script>
     <script src="renderer.js"></script>
   </body>
 </html>

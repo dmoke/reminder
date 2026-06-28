@@ -1,0 +1,248 @@
+/* ==========================================================================
+   MODULE A — Always-on-top Alert Window styles (.alert-* prefix only)
+   Urgent red/amber accent on the app's rounded, soft-shadow aesthetic.
+   Surfaces #f8fafc/white, text #111827/#475569, accents red #b91c1c /
+   amber #b45309. Window is ~420px wide, content-height (chrome handled by
+   the main process).
+   ========================================================================== */
+
+.alert-body {
+  margin: 0;
+  min-height: 100vh;
+  padding: 14px;
+  background: linear-gradient(180deg, #fff7f6 0%, #fdeeee 100%);
+}
+
+.alert-root {
+  max-width: 420px;
+  margin: 0 auto;
+  padding: 20px;
+  background: rgba(255, 255, 255, 0.98);
+  border: 1px solid rgba(239, 68, 68, 0.18);
+  border-radius: 28px;
+  box-shadow:
+    0 24px 60px rgba(15, 23, 42, 0.14),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.6);
+}
+
+/* ---- Header ---- */
+.alert-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding-bottom: 14px;
+  margin-bottom: 14px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.16);
+}
+
+.alert-bell {
+  font-size: 1.5rem;
+  line-height: 1;
+  filter: drop-shadow(0 4px 8px rgba(185, 28, 28, 0.25));
+}
+
+.alert-title-wrap {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.alert-title {
+  margin: 0;
+  font-size: 1.25rem;
+  line-height: 1.1;
+  color: #111827;
+  font-weight: 700;
+}
+
+.alert-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 24px;
+  height: 24px;
+  padding: 0 8px;
+  border-radius: 999px;
+  background: rgba(239, 68, 68, 0.14);
+  color: #b91c1c;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+/* ---- List + rows ---- */
+.alert-list {
+  display: grid;
+  gap: 12px;
+}
+
+.alert-row {
+  background: #f8fafc;
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  border-left: 4px solid #ef4444;
+  border-radius: 18px;
+  padding: 14px 16px;
+  box-shadow: 0 8px 22px rgba(15, 23, 42, 0.05);
+}
+
+.alert-row-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.alert-row-text {
+  flex: 1;
+  font-size: 1.02rem;
+  font-weight: 600;
+  color: #111827;
+  line-height: 1.3;
+  word-break: break-word;
+}
+
+.alert-star {
+  color: #f59e0b;
+  font-size: 1rem;
+  line-height: 1.3;
+}
+
+.alert-row-rel {
+  margin-top: 6px;
+  color: #b91c1c;
+  font-size: 0.88rem;
+  font-weight: 600;
+}
+
+/* ---- Meta: tag chips + recurring ---- */
+.alert-row-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.alert-chip {
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.16);
+  color: #475569;
+  font-size: 0.76rem;
+  font-weight: 600;
+}
+
+.alert-chip-recurring {
+  background: rgba(180, 83, 9, 0.12);
+  color: #b45309;
+}
+
+/* ---- Per-row actions ---- */
+.alert-row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.alert-snooze {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.alert-snooze-label {
+  color: #6b7280;
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+/* ---- Buttons ---- */
+.alert-btn {
+  font: inherit;
+  border: none;
+  border-radius: 12px;
+  cursor: pointer;
+  padding: 9px 14px;
+  font-weight: 600;
+  font-size: 0.9rem;
+  transition:
+    transform 0.12s ease,
+    background 0.12s ease,
+    box-shadow 0.12s ease;
+}
+
+.alert-btn:hover {
+  transform: translateY(-1px);
+}
+
+.alert-btn:active {
+  transform: translateY(0);
+}
+
+/* Complete: confident dark gradient (matches .primary-btn). */
+.alert-btn-complete {
+  background: linear-gradient(135deg, #111827 0%, #0f172a 100%);
+  color: #ffffff;
+  box-shadow: 0 12px 26px rgba(15, 23, 42, 0.18);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+}
+
+.alert-btn-complete:hover {
+  box-shadow: 0 16px 32px rgba(15, 23, 42, 0.22);
+}
+
+/* Snooze chips: light amber-tinted. */
+.alert-btn-snooze {
+  padding: 7px 11px;
+  font-size: 0.82rem;
+  background: #fffbeb;
+  color: #b45309;
+  border: 1px solid rgba(180, 83, 9, 0.22);
+}
+
+.alert-btn-snooze:hover {
+  background: #fef3c7;
+}
+
+/* ---- Bulk actions ---- */
+.alert-bulk {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid rgba(148, 163, 184, 0.16);
+}
+
+/* ---- Footer ---- */
+.alert-footer {
+  display: flex;
+  gap: 10px;
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid rgba(148, 163, 184, 0.16);
+}
+
+.alert-btn-open {
+  flex: 1;
+  background: #f8fafc;
+  color: #1d4ed8;
+  border: 1px solid rgba(59, 130, 246, 0.2);
+}
+
+.alert-btn-open:hover {
+  background: #eff6ff;
+}
+
+.alert-btn-dismiss {
+  flex: 1;
+  background: #fef2f2;
+  color: #b91c1c;
+  border: 1px solid rgba(239, 68, 68, 0.2);
+}
+
+.alert-btn-dismiss:hover {
+  background: #fee2e2;
+}
