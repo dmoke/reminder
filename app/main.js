@@ -97,6 +97,11 @@ function lang() {
 function initApp() {
   config = Config.load();
   if (!config.dataPath) return false;
+  // Start with Windows is on by default; persist it explicitly on first run.
+  if (config.openAtLogin === undefined) {
+    config.openAtLogin = true;
+    Config.save(config);
+  }
   storage = new Storage(config.dataPath, notifyRefresh);
   scheduler = new Scheduler(storage, handleDue);
   scheduler.start();
@@ -394,6 +399,9 @@ ipcMain.handle("archive-reminder", (event, id, expectedTime) =>
   completeReminder(id, expectedTime),
 );
 ipcMain.handle("delete-reminder", (event, id) => storage.delete(id));
+ipcMain.handle("delete-tag", (event, tag) =>
+  typeof tag === "string" && tag ? storage.removeTag(tag) : false,
+);
 ipcMain.handle("open-add-window", () => openAddModal());
 ipcMain.handle("get-config", () => ({
   dataPath: config.dataPath || "",

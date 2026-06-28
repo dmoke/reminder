@@ -97,6 +97,31 @@ class Storage {
     return true;
   }
 
+  // Remove a tag from every active and history reminder (global tag delete).
+  removeTag(tag) {
+    let changed = false;
+    this.active.forEach((r) => {
+      if (Array.isArray(r.tags) && r.tags.includes(tag)) {
+        r.tags = r.tags.filter((x) => x !== tag);
+        changed = true;
+      }
+    });
+    if (changed) this.writeFile(this.activePath, this.active);
+
+    const history = this.getHistory();
+    let historyChanged = false;
+    history.forEach((r) => {
+      if (Array.isArray(r.tags) && r.tags.includes(tag)) {
+        r.tags = r.tags.filter((x) => x !== tag);
+        historyChanged = true;
+      }
+    });
+    if (historyChanged) this.writeFile(this.historyPath, history);
+
+    if (changed || historyChanged) this.notify();
+    return changed || historyChanged;
+  }
+
   // Complete one occurrence of a recurring reminder: push a completed snapshot
   // to history AND advance the still-active reminder to its next occurrence.
   recurComplete(id, nextTime) {

@@ -12,6 +12,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
   archiveReminder: (id, expectedTime) =>
     ipcRenderer.invoke("archive-reminder", id, expectedTime),
   deleteReminder: (id) => ipcRenderer.invoke("delete-reminder", id),
+  deleteTag: (tag) => ipcRenderer.invoke("delete-tag", tag),
   openAddWindow: () => ipcRenderer.invoke("open-add-window"),
   getConfig: () => ipcRenderer.invoke("get-config"),
   chooseFolder: () => ipcRenderer.invoke("choose-folder"),

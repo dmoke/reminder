@@ -36,6 +36,9 @@ let tagFilterValue = "";
 let currentView = "activePanel";
 let modalMode = "create"; // 'create' | 'edit' | 'duplicate'
 let modalEditId = null;
+let modalSelectedTags = new Set();
+let modalFavorite = false;
+let modalManageTags = false;
 
 // ---- small helpers ---------------------------------------------------------
 
@@ -229,9 +232,14 @@ const translations = {
     "modal-text-ph": "Reminder text",
     "modal-when-label": "Date & time",
     "modal-repeat-label": "Repeat",
-    "modal-tags-label": "Tags (comma separated)",
+    "modal-tags-label": "Tags",
     "modal-tags-ph": "work, home, urgent",
     "modal-favorite-label": "Mark as favorite",
+    "modal-newtag-ph": "New tag",
+    "modal-addtag": "Add",
+    "modal-managetags": "Edit tags (add / delete)",
+    "modal-close": "Close",
+    "tags-none": "No tags yet",
     "modal-cancel": "Cancel",
     "modal-save": "Save",
     "quick-today": "Later today",
@@ -329,9 +337,14 @@ const translations = {
     "modal-text-ph": "Текст нагадування",
     "modal-when-label": "Дата та час",
     "modal-repeat-label": "Повторення",
-    "modal-tags-label": "Мітки (через кому)",
+    "modal-tags-label": "Мітки",
     "modal-tags-ph": "робота, дім, терміново",
     "modal-favorite-label": "Позначити як обране",
+    "modal-newtag-ph": "Нова мітка",
+    "modal-addtag": "Додати",
+    "modal-managetags": "Редагувати мітки (додати / видалити)",
+    "modal-close": "Закрити",
+    "tags-none": "Поки що немає міток",
     "modal-cancel": "Скасувати",
     "modal-save": "Зберегти",
     "quick-today": "Пізніше сьогодні",
@@ -397,6 +410,7 @@ function createCard(reminder, isHistory) {
   const title = document.createElement("h3");
   title.className = "card-title";
   title.textContent = reminder.text;
+  title.title = reminder.text; // full text on hover; card stays compact
   titleRow.appendChild(title);
   if (recurrence !== "none") {
     const recur = document.createElement("span");
@@ -746,10 +760,83 @@ function buildTimeOptions() {
   });
 }
 
+// All tags currently in use across active + history, plus any selected now.
+function collectKnownTags() {
+  const set = new Set();
+  allReminders.forEach((r) => (r.tags || []).forEach((tag) => set.add(tag)));
+  allHistory.forEach((r) => (r.tags || []).forEach((tag) => set.add(tag)));
+  modalSelectedTags.forEach((tag) => set.add(tag));
+  return [...set].sort((a, b) => a.localeCompare(b));
+}
+
+function updateFavButton() {
+  const btn = document.getElementById("modalFavBtn");
+  if (!btn) return;
+  btn.textContent = modalFavorite ? "★" : "☆";
+  btn.classList.toggle("active", modalFavorite);
+}
+
+function renderModalTagChips() {
+  const wrap = document.getElementById("modalTagChips");
+  if (!wrap) return;
+  wrap.innerHTML = "";
+  const known = collectKnownTags();
+  if (!known.length) {
+    wrap.appendChild(
+      Object.assign(document.createElement("span"), {
+        className: "tag-toggle tag-toggle--empty",
+        textContent: t("tags-none"),
+      }),
+    );
+    return;
+  }
+  known.forEach((tag) => {
+    const chip = document.createElement("button");
+    chip.type = "button";
+    chip.className =
+      "tag-toggle" + (modalSelectedTags.has(tag) ? " selected" : "");
+    chip.textContent = "#" + tag;
+    if (modalManageTags) {
+      const del = document.createElement("span");
+      del.className = "tag-del";
+      del.textContent = "×";
+      chip.appendChild(del);
+      chip.addEventListener("click", async () => {
+        await electronAPI.deleteTag(tag);
+        modalSelectedTags.delete(tag);
+        allReminders = await electronAPI.getReminders();
+        allHistory = await electronAPI.getHistory();
+        renderModalTagChips();
+        loadActiveFiltered();
+      });
+    } else {
+      chip.addEventListener("click", () => {
+        if (modalSelectedTags.has(tag)) modalSelectedTags.delete(tag);
+        else modalSelectedTags.add(tag);
+        renderModalTagChips();
+      });
+    }
+    wrap.appendChild(chip);
+  });
+}
+
+function addNewTagFromInput() {
+  const input = document.getElementById("modalNewTag");
+  if (!input) return;
+  const value = input.value.trim();
+  if (!value) return;
+  modalSelectedTags.add(value);
+  input.value = "";
+  renderModalTagChips();
+}
+
 function openModal(mode, reminder) {
   if (!modal) return;
   modalMode = mode;
   modalEditId = mode === "edit" ? reminder.id : null;
+  modalManageTags = false;
+  const manageBtn = document.getElementById("modalManageTags");
+  if (manageBtn) manageBtn.dataset.active = "false";
 
   const titleEl = document.getElementById("modalTitle");
   if (titleEl) {
@@ -764,8 +851,6 @@ function openModal(mode, reminder) {
   const textEl = document.getElementById("modalText");
   const timeEl = document.getElementById("modalTime");
   const recEl = document.getElementById("modalRecurrence");
-  const tagsEl = document.getElementById("modalTags");
-  const favEl = document.getElementById("modalFavorite");
   const errEl = document.getElementById("modalError");
   if (errEl) errEl.textContent = "";
 
@@ -782,8 +867,13 @@ function openModal(mode, reminder) {
     timeEl.value = toDatetimeLocal(base);
   }
   if (recEl) recEl.value = r.recurrence || "none";
-  if (tagsEl) tagsEl.value = (r.tags || []).join(", ");
-  if (favEl) favEl.checked = !!r.favorite;
+
+  modalSelectedTags = new Set(r.tags || []);
+  modalFavorite = !!r.favorite;
+  updateFavButton();
+  renderModalTagChips();
+  const newTagInput = document.getElementById("modalNewTag");
+  if (newTagInput) newTagInput.value = "";
 
   modal.classList.remove("hidden");
   if (textEl) textEl.focus();
@@ -799,8 +889,11 @@ async function saveModal() {
   const text = (document.getElementById("modalText")?.value || "").trim();
   const timeVal = document.getElementById("modalTime")?.value || "";
   const recurrence = document.getElementById("modalRecurrence")?.value || "none";
-  const tags = parseTags(document.getElementById("modalTags")?.value);
-  const favorite = !!document.getElementById("modalFavorite")?.checked;
+  // Include anything typed in the new-tag box but not yet committed.
+  const pending = (document.getElementById("modalNewTag")?.value || "").trim();
+  if (pending) modalSelectedTags.add(pending);
+  const tags = [...modalSelectedTags];
+  const favorite = modalFavorite;
 
   const showError = (msg) => {
     if (errEl) errEl.textContent = msg;
@@ -925,11 +1018,18 @@ function updateAllTranslations() {
   set("#modalWhenLabel", t("modal-when-label"));
   set("#modalRepeatLabel", t("modal-repeat-label"));
   set("#modalTagsLabel", t("modal-tags-label"));
-  set("#modalFavoriteLabel", t("modal-favorite-label"));
   const modalText = document.getElementById("modalText");
   if (modalText) modalText.placeholder = t("modal-text-ph");
-  const modalTags = document.getElementById("modalTags");
-  if (modalTags) modalTags.placeholder = t("modal-tags-ph");
+  const modalNewTag = document.getElementById("modalNewTag");
+  if (modalNewTag) modalNewTag.placeholder = t("modal-newtag-ph");
+  const modalAddTag = document.getElementById("modalAddTag");
+  if (modalAddTag) modalAddTag.textContent = t("modal-addtag");
+  const modalManage = document.getElementById("modalManageTags");
+  if (modalManage) modalManage.title = t("modal-managetags");
+  const modalFavBtn = document.getElementById("modalFavBtn");
+  if (modalFavBtn) modalFavBtn.title = t("modal-favorite-label");
+  const modalClose = document.getElementById("modalClose");
+  if (modalClose) modalClose.title = t("modal-close");
   const modalCancel = document.getElementById("modalCancel");
   const modalSave = document.getElementById("modalSave");
   if (modalCancel) modalCancel.textContent = t("modal-cancel");
@@ -1029,7 +1129,24 @@ viewButtons.forEach((button) => {
 // Add button + modal
 document.getElementById("addBtn")?.addEventListener("click", () => openModal("create"));
 document.getElementById("modalCancel")?.addEventListener("click", closeModal);
+document.getElementById("modalClose")?.addEventListener("click", closeModal);
 document.getElementById("modalSave")?.addEventListener("click", saveModal);
+document.getElementById("modalFavBtn")?.addEventListener("click", () => {
+  modalFavorite = !modalFavorite;
+  updateFavButton();
+});
+document.getElementById("modalAddTag")?.addEventListener("click", addNewTagFromInput);
+document.getElementById("modalNewTag")?.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") {
+    e.preventDefault();
+    addNewTagFromInput();
+  }
+});
+document.getElementById("modalManageTags")?.addEventListener("click", (e) => {
+  modalManageTags = !modalManageTags;
+  e.currentTarget.dataset.active = modalManageTags ? "true" : "false";
+  renderModalTagChips();
+});
 modal?.addEventListener("click", (e) => {
   if (e.target === modal) closeModal();
 });

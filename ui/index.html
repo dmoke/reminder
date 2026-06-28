@@ -162,35 +162,53 @@
     <!-- Add / Edit / Duplicate modal -->
     <div id="reminderModal" class="modal-overlay hidden">
       <div class="modal modal--form">
-        <h2 id="modalTitle">Add reminder</h2>
+        <div class="modal-head">
+          <h2 id="modalTitle">Add reminder</h2>
+          <div class="modal-head-actions">
+            <button id="modalFavBtn" class="fav-btn modal-fav" title="Favorite">
+              ☆
+            </button>
+            <button id="modalClose" class="modal-close" title="Close">✕</button>
+          </div>
+        </div>
 
-        <label id="modalTextLabel" for="modalText">Reminder text</label>
-        <input type="text" id="modalText" placeholder="Reminder text" />
+        <div class="modal-body">
+          <label id="modalTextLabel" for="modalText">Reminder text</label>
+          <input type="text" id="modalText" placeholder="Reminder text" />
 
-        <label id="modalWhenLabel" for="modalTime">Date &amp; time</label>
-        <input type="datetime-local" id="modalTime" />
-        <div class="quick-options" id="quickOptions"></div>
-        <div class="quick-options" id="timeOptions"></div>
+          <label id="modalWhenLabel" for="modalTime">Date &amp; time</label>
+          <input type="datetime-local" id="modalTime" />
+          <div class="quick-options" id="quickOptions"></div>
+          <div class="quick-options" id="timeOptions"></div>
 
-        <label id="modalRepeatLabel" for="modalRecurrence">Repeat</label>
-        <select id="modalRecurrence" class="filter-select">
-          <option value="none">Does not repeat</option>
-          <option value="daily">Daily</option>
-          <option value="weekdays">Every weekday</option>
-          <option value="weekly">Weekly</option>
-          <option value="monthly">Monthly</option>
-          <option value="yearly">Yearly</option>
-        </select>
+          <label id="modalRepeatLabel" for="modalRecurrence">Repeat</label>
+          <select id="modalRecurrence" class="filter-select">
+            <option value="none">Does not repeat</option>
+            <option value="daily">Daily</option>
+            <option value="weekdays">Every weekday</option>
+            <option value="weekly">Weekly</option>
+            <option value="monthly">Monthly</option>
+            <option value="yearly">Yearly</option>
+          </select>
 
-        <label id="modalTagsLabel" for="modalTags">Tags (comma separated)</label>
-        <input type="text" id="modalTags" placeholder="work, home, urgent" />
+          <label id="modalTagsLabel">Tags</label>
+          <div id="modalTagChips" class="tag-toggle-row"></div>
+          <div class="tag-add-row">
+            <input type="text" id="modalNewTag" placeholder="New tag" />
+            <button type="button" id="modalAddTag" class="quick-btn">Add</button>
+            <button
+              type="button"
+              id="modalManageTags"
+              class="quick-btn"
+              title="Edit tags"
+            >
+              ✎
+            </button>
+          </div>
 
-        <label class="modal-check">
-          <input type="checkbox" id="modalFavorite" />
-          <span id="modalFavoriteLabel">Mark as favorite</span>
-        </label>
+          <p class="modal-error" id="modalError"></p>
+        </div>
 
-        <p class="modal-error" id="modalError"></p>
         <div class="modal-actions">
           <button class="secondary-btn" id="modalCancel">Cancel</button>
           <button class="primary-btn" id="modalSave">Save</button>
