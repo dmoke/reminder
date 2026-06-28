@@ -14,7 +14,13 @@ class Storage {
 
   readFile(filePath) {
     try {
-      return JSON.parse(fs.readFileSync(filePath, "utf8"));
+      const parsed = JSON.parse(fs.readFileSync(filePath, "utf8"));
+      // Valid JSON that is not an array (e.g. `null`, an object, a hand-edited
+      // or legacy file) would otherwise flow through getActive()/getHistory()
+      // and crash the scheduler on the first push/findIndex. Treat it as corrupt
+      // so it is quarantined and replaced with a usable empty list.
+      if (!Array.isArray(parsed)) throw new Error("expected a JSON array");
+      return parsed;
     } catch (err) {
       if (err.code === "ENOENT") {
         this.writeFile(filePath, []);

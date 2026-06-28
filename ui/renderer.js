@@ -9,6 +9,7 @@ if (!electronAPI) {
     getConfig: async () => ({ dataPath: "", openAtLogin: true, language: "en" }),
     chooseFolder: async () => null,
     openFolder: async () => false,
+    openBackupsFolder: async () => false,
     addReminder: async () => {},
     updateReminder: async () => {},
     archiveReminder: async () => {},
@@ -19,6 +20,7 @@ if (!electronAPI) {
     onOpenAddModal: () => {},
     onOpenEditModal: () => {},
     alertEditDone: async () => {},
+    fitWindowHeight: () => {},
   };
 }
 
@@ -44,6 +46,10 @@ let calTagValue = "";
 let histFav = false;
 let histRecur = false;
 let histTagValue = "";
+// Completed-tab multi-select: ids ticked for deletion + the currently rendered
+// (filtered + sorted) history list, so "Select all" knows what's on screen.
+const historySelection = new Set();
+let historyView = [];
 // Sort state per list (key: "due" | "created" | "title").
 let activeSort = { key: "due", dir: "asc" };
 let histSort = { key: "due", dir: "desc" };
@@ -233,7 +239,7 @@ function buildPreviewBody(reminder) {
   if (recurrence !== "none") {
     const rec = document.createElement("p");
     rec.className = "preview-recur";
-    rec.textContent = "🔁 " + t("recur-" + recurrence);
+    rec.textContent = "🗘 " + t("recur-" + recurrence);
     body.appendChild(rec);
   }
 
@@ -286,6 +292,20 @@ function formatDate(value) {
     hour: "2-digit",
     minute: "2-digit",
   });
+}
+
+// Date without the time-of-day — used for the completed list rows (the preview
+// popup still shows the full date + time). Adds the year only if not this one.
+function formatDateOnly(value) {
+  const d = new Date(value);
+  if (isNaN(d.getTime())) return "";
+  const sameYear = d.getFullYear() === new Date().getFullYear();
+  return d.toLocaleDateString(
+    [],
+    sameYear
+      ? { weekday: "short", month: "short", day: "numeric" }
+      : { weekday: "short", year: "numeric", month: "short", day: "numeric" },
+  );
 }
 
 // Compact date (no time) for the "created" line; adds the year only if not this one.
@@ -430,7 +450,7 @@ const translations = {
     "search-active": "Search reminders...",
     "filter-all-tags": "All tags",
     "filter-favorites": "★ Favorites",
-    "filter-repeating": "🔁 Repeating",
+    "filter-repeating": "🗘 Repeating",
     "view-list": "☰ List",
     "view-grid": "▦ Grid",
     "panel-history-title": "Completed reminders",
@@ -439,6 +459,9 @@ const translations = {
     "search-history": "Search completed...",
     "delete-history-title": "Delete history",
     "delete-btn": "Delete in range",
+    "delete-selected-btn": "Delete selected",
+    "select-all": "Select all",
+    "select-row": "Select",
     "delete-confirm-msg": "Are you sure? This action cannot be undone.",
     "delete-confirm-btn": "Confirm delete",
     "delete-cancel-btn": "Cancel",
@@ -453,6 +476,11 @@ const translations = {
     "storage-not-set": "Not set",
     "change-path-btn": "Change",
     "open-path-btn": "Open",
+    "backup-label": "Backups:",
+    "backup-desc":
+      "Latest snapshot (reminder-backup-<date>.json), refreshed on launch and " +
+      "after updates. Share it to restore your reminders.",
+    "open-backups-btn": "Open backups folder",
     "language-label": "Language:",
     "lang-en": "English",
     "lang-uk": "Українська",
@@ -532,10 +560,10 @@ const translations = {
     "quick-tomorrow": "Tomorrow",
     "quick-weekend": "This weekend",
     "quick-nextweek": "Next week",
-    "quick-morning": "🌅 Before lunch",
-    "quick-midday": "☀️ Midday",
-    "quick-afternoon": "🌆 Afternoon",
-    "quick-evening": "🌙 Evening",
+    "quick-morning": "☼ Morning",
+    "quick-midday": "☀ Midday",
+    "quick-afternoon": "☽ Afternoon",
+    "quick-evening": "☾ Evening",
     "snooze-tomorrow": "Tomorrow",
     "calendar-today": "Today",
     "calendar-more": "+{n} more",
@@ -546,6 +574,7 @@ const translations = {
     "alert-invalid-date": "Please choose a valid date and time.",
     "alert-past-time": "Reminder time must be in the future.",
     "alert-save-failed": "Unable to save reminder. Please try again.",
+    "toast-created": "✅ Created",
   },
   uk: {
     "eyebrow-title": "Ваші нагадування",
@@ -566,7 +595,7 @@ const translations = {
     "search-active": "Пошук нагадувань...",
     "filter-all-tags": "Усі теги",
     "filter-favorites": "★ Обрані",
-    "filter-repeating": "🔁 З повтором",
+    "filter-repeating": "🗘 З повтором",
     "view-list": "☰ Список",
     "view-grid": "▦ Сітка",
     "panel-history-title": "Завершені нагадування",
@@ -575,6 +604,9 @@ const translations = {
     "search-history": "Пошук завершених...",
     "delete-history-title": "Очистити історію",
     "delete-btn": "Видалити за період",
+    "delete-selected-btn": "Видалити вибрані",
+    "select-all": "Вибрати всі",
+    "select-row": "Вибрати",
     "delete-confirm-msg": "Ви впевнені? Цю дію неможливо скасувати.",
     "delete-confirm-btn": "Підтвердити видалення",
     "delete-cancel-btn": "Скасувати",
@@ -589,6 +621,11 @@ const translations = {
     "storage-not-set": "Не вказано",
     "change-path-btn": "Змінити",
     "open-path-btn": "Відкрити",
+    "backup-label": "Резервні копії:",
+    "backup-desc":
+      "Останній знімок (reminder-backup-<дата>.json), оновлюється під час " +
+      "запуску та після оновлень. Поділіться ним, щоб відновити нагадування.",
+    "open-backups-btn": "Відкрити папку резервних копій",
     "language-label": "Мова:",
     "lang-en": "English",
     "lang-uk": "Українська",
@@ -668,10 +705,10 @@ const translations = {
     "quick-tomorrow": "Завтра",
     "quick-weekend": "Вихідні",
     "quick-nextweek": "Наст. тиждень",
-    "quick-morning": "🌅 До обіду",
-    "quick-midday": "☀️ Опівдні",
-    "quick-afternoon": "🌆 Пополудні",
-    "quick-evening": "🌙 Увечері",
+    "quick-morning": "☼ Ранок",
+    "quick-midday": "☀ Опівдні",
+    "quick-afternoon": "☽ Пополудні",
+    "quick-evening": "☾ Увечері",
     "snooze-tomorrow": "Завтра",
     "calendar-today": "Сьогодні",
     "calendar-more": "+{n} ще",
@@ -682,6 +719,7 @@ const translations = {
     "alert-invalid-date": "Будь ласка, виберіть коректні дату й час.",
     "alert-past-time": "Час нагадування має бути в майбутньому.",
     "alert-save-failed": "Не вдалося зберегти нагадування. Спробуйте ще раз.",
+    "toast-created": "✅ Створено",
   },
 };
 
@@ -719,6 +757,21 @@ function createCard(reminder, isHistory) {
     head.appendChild(fav);
   }
 
+  if (isHistory) {
+    // A tick box for multi-select delete on the Completed tab.
+    const sel = document.createElement("input");
+    sel.type = "checkbox";
+    sel.className = "select-box";
+    sel.title = t("select-row");
+    sel.checked = historySelection.has(reminder.id);
+    sel.addEventListener("change", () => {
+      if (sel.checked) historySelection.add(reminder.id);
+      else historySelection.delete(reminder.id);
+      updateHistSelectionUI();
+    });
+    head.appendChild(sel);
+  }
+
   const info = document.createElement("div");
   info.className = "card-info";
 
@@ -738,7 +791,7 @@ function createCard(reminder, isHistory) {
   if (recurrence !== "none") {
     const recur = document.createElement("span");
     recur.className = "recur-badge";
-    recur.textContent = "🔁 " + t("recur-" + recurrence);
+    recur.textContent = "🗘 " + t("recur-" + recurrence);
     titleRow.appendChild(recur);
   }
   info.appendChild(titleRow);
@@ -747,7 +800,7 @@ function createCard(reminder, isHistory) {
   when.className = "card-when";
   if (isHistory) {
     when.textContent = reminder.completedAt
-      ? `${t("card-badge-completed")} · ${formatDate(reminder.completedAt)}`
+      ? `${t("card-badge-completed")} · ${formatDateOnly(reminder.completedAt)}`
       : t("card-badge-completed");
   } else if (overdue) {
     when.textContent = `${t("card-badge-overdue")} · ${t("card-due-prefix")} ${formatDate(reminder.time)}`;
@@ -911,35 +964,123 @@ function createCard(reminder, isHistory) {
 
 // ---- list loading + filtering ----------------------------------------------
 
-// In list view, the list shows at most this many rows; the rest scroll.
-const LIST_VISIBLE_ROWS = 10;
+// --- window auto-fit --------------------------------------------------------
+// The window grows/shrinks to fit the current list: short when there are only a
+// few reminders (down to just the page chrome), capped at WIN_MAX_HEIGHT. Once
+// the content would exceed the cap, the window stays put and the list itself
+// scrolls (with a faded bottom edge — the `.is-capped` modifier).
+const WIN_MAX_HEIGHT = 920; // keep in sync with main.js
+const MIN_LIST_HEIGHT = 96; // never collapse the list below this when capped
+// Stays false until the first real data load, so the early (empty-list) layout
+// passes only cap the list and don't shrink the window before content exists.
+let autoFitReady = false;
+// True while the add/edit form modal is open: the window is pinned to its full
+// height (the modal is sized in vh, so a shrunk window would crop it) and the
+// auto-fit is suppressed so background reloads can't shrink it out from under.
+let windowHeightLocked = false;
 
-// Cap the list to ~N rows (measured from the real rows) and scroll the rest.
-// Only in list view; grid view grows naturally with the page. Plain
-// max-height + overflow on the grid — no flex sizing — so rows never overlap.
-function capListHeight(list) {
-  if (!list) return;
-  // Grid view → never cap (the page scrolls naturally).
-  if (viewMode !== "list") {
-    list.style.maxHeight = "";
-    list.style.overflow = "";
-    return;
-  }
-  // A hidden panel reports 0 heights — skip; it's re-capped when its tab shows.
-  if (!list.offsetParent) return;
-  const cards = list.querySelectorAll(".card");
-  if (cards.length <= LIST_VISIBLE_ROWS) {
-    list.style.maxHeight = "";
-    list.style.overflow = "";
-    return;
-  }
-  const rowGap = parseFloat(getComputedStyle(list).rowGap) || 0;
-  let h = 0;
-  for (let i = 0; i < LIST_VISIBLE_ROWS; i++) h += cards[i].offsetHeight;
-  h += rowGap * (LIST_VISIBLE_ROWS - 1);
-  list.style.maxHeight = Math.round(h) + "px";
-  list.style.overflow = "hidden auto"; // vertical scroll only
+function visiblePanelList() {
+  if (currentView === "activePanel") return activeList;
+  if (currentView === "historyPanel") return historyList;
+  return null; // calendar / settings have no scrolling list
 }
+
+function shellVMargin(shell) {
+  const cs = getComputedStyle(shell);
+  return (parseFloat(cs.marginTop) || 0) + (parseFloat(cs.marginBottom) || 0);
+}
+
+// Pixels the OS frame (title bar + borders) adds on top of the content area.
+function frameHeight() {
+  return Math.max(0, (window.outerHeight || 0) - (window.innerHeight || 0));
+}
+
+// `scrollHeight` reports a list's full content height even while it's capped, so
+// we can measure (and re-cap) without ever uncapping — which means the user's
+// scroll position is preserved and there's no flicker.
+//
+// `chrome` is the height of everything on the page except the list itself:
+//   chrome = shell box + vertical margins − list's *visible* height
+// and the full document height is then chrome + the list's full content.
+function chromeHeight(shell, list) {
+  return shell.offsetHeight + shellVMargin(shell) - list.clientHeight;
+}
+
+// Cap `list` so it occupies at most (availContent − chrome) and toggle the
+// scroll-fade. No-op visual change when the content already fits.
+function capListTo(list, availContent, chrome) {
+  const prevScroll = list.scrollTop;
+  const avail = availContent - chrome;
+  if (list.scrollHeight > avail + 1) {
+    list.style.maxHeight = Math.max(MIN_LIST_HEIGHT, Math.round(avail)) + "px";
+    list.classList.add("is-capped");
+    list.scrollTop = prevScroll; // keep position across a re-cap
+  } else {
+    list.style.maxHeight = "";
+    list.classList.remove("is-capped");
+  }
+}
+
+// Re-cap the visible list to the CURRENT window size (used on manual resize —
+// does not resize the window, so it never fights the user's drag).
+function capVisibleListToViewport() {
+  const shell = document.querySelector(".page-shell");
+  const list = visiblePanelList();
+  if (!shell || !list || !list.offsetParent) return;
+  capListTo(list, window.innerHeight, chromeHeight(shell, list));
+}
+
+// Size the window to fit the current content (clamped to the max), capping the
+// visible list only when the content would overflow that max.
+function relayout() {
+  const shell = document.querySelector(".page-shell");
+  if (!shell) return;
+  // The calendar mounts only after its data loads, so the active/history load
+  // passes run while its panel is still empty — don't shrink the window to that
+  // blank panel. renderCalendar's onRendered callback re-fits once it's mounted.
+  // (Skip this guard while the modal lock is active — the window must stay full.)
+  if (
+    !windowHeightLocked &&
+    currentView === "calendarPanel" &&
+    (document.getElementById("calendarContainer")?.childElementCount || 0) === 0
+  ) {
+    return;
+  }
+  const maxContent = WIN_MAX_HEIGHT - frameHeight();
+  const list = visiblePanelList();
+  const hasList = list && list.offsetParent;
+  const chrome = hasList ? chromeHeight(shell, list) : 0;
+
+  let target;
+  if (windowHeightLocked) {
+    // Form modal open → keep the window full-height regardless of the list.
+    target = maxContent;
+  } else if (hasList) {
+    target = Math.min(chrome + list.scrollHeight, maxContent); // uncapped doc height
+  } else {
+    target = Math.min(shell.offsetHeight + shellVMargin(shell), maxContent);
+  }
+
+  if (hasList) {
+    capListTo(list, target, chrome);
+  } else if (list) {
+    list.style.maxHeight = "";
+    list.classList.remove("is-capped");
+  }
+
+  if (autoFitReady || windowHeightLocked) {
+    electronAPI.fitWindowHeight?.(Math.ceil(target));
+  }
+}
+
+// Keep the list filling the window on any resize (manual drag, or the
+// programmatic resize our own relayout triggers). This only re-caps the list —
+// it never calls back into fitWindowHeight, so there's no resize feedback loop.
+let resizeRaf = null;
+window.addEventListener("resize", () => {
+  if (resizeRaf) cancelAnimationFrame(resizeRaf);
+  resizeRaf = requestAnimationFrame(capVisibleListToViewport);
+});
 
 function applyViewMode() {
   [activeList, historyList].forEach((list) => {
@@ -952,8 +1093,7 @@ function applyViewMode() {
   if (listBtn) listBtn.classList.toggle("active", viewMode === "list");
   if (gridBtn) gridBtn.classList.toggle("active", viewMode === "grid");
   syncSortHeaders();
-  capListHeight(activeList);
-  capListHeight(historyList);
+  relayout();
 }
 
 function populateTagFilter() {
@@ -1061,7 +1201,7 @@ async function loadActiveFiltered() {
   }
   if (overdueCount) overdueCount.textContent = overdue.toString();
   if (upcomingCount) upcomingCount.textContent = upcoming.toString();
-  capListHeight(activeList);
+  relayout();
 }
 
 async function loadHistoryFiltered() {
@@ -1083,6 +1223,11 @@ async function loadHistoryFiltered() {
   const sorted = filtered
     .slice()
     .sort((a, b) => compareReminders(a, b, histSort));
+  historyView = sorted;
+  // Drop ticked ids that no longer exist (e.g. deleted individually).
+  const liveIds = new Set(allHistory.map((r) => r.id));
+  for (const id of [...historySelection])
+    if (!liveIds.has(id)) historySelection.delete(id);
   sorted.forEach((item) => historyList.appendChild(createCard(item, true)));
   if (!sorted.length) {
     const hasFilters = term || histFav || histRecur || histTagValue;
@@ -1090,7 +1235,26 @@ async function loadHistoryFiltered() {
       makeEmptyState(hasFilters ? t("empty-no-results") : t("empty-completed")),
     );
   }
-  capListHeight(historyList);
+  updateHistSelectionUI();
+  relayout();
+}
+
+// Refresh the "Delete selected (N)" button and the "Select all" tri-state from
+// the current selection set vs. what's on screen.
+function updateHistSelectionUI() {
+  const btn = document.getElementById("deleteSelectedBtn");
+  const all = document.getElementById("histSelectAll");
+  const n = historySelection.size;
+  if (btn) {
+    btn.textContent = `${t("delete-selected-btn")} (${n})`;
+    btn.disabled = n === 0;
+  }
+  if (all) {
+    const visible = historyView.map((r) => r.id);
+    const picked = visible.filter((id) => historySelection.has(id)).length;
+    all.checked = visible.length > 0 && picked === visible.length;
+    all.indeterminate = picked > 0 && picked < visible.length;
+  }
 }
 
 async function loadConfig() {
@@ -1119,10 +1283,14 @@ async function renderCalendar() {
     lang: currentLang,
     onSelectDate: (date) => openModal("create", { time: date.toISOString() }),
     onSelectReminder: (rem) => openPreview(rem),
+    // Re-fit the window once the calendar's real height is in the DOM (it mounts
+    // after its data loads, so the earlier relayout passes saw an empty panel).
+    onRendered: () => relayout(),
   });
 }
 
 async function reload() {
+  autoFitReady = true; // real data is loading — auto-fit may now resize the window
   await loadActiveFiltered();
   await loadHistoryFiltered();
   await loadConfig();
@@ -1332,7 +1500,7 @@ function buildTimeOptions() {
   if (!wrap) return;
   wrap.innerHTML = "";
   [
-    ["quick-morning", 11, 0, "morning"],
+    ["quick-morning", 10, 0, "morning"],
     ["quick-midday", 12, 0, "midday"],
     ["quick-afternoon", 17, 0, "afternoon"],
     ["quick-evening", 21, 0, "evening"],
@@ -1586,18 +1754,49 @@ function openModal(mode, reminder) {
 
   modal.classList.remove("hidden");
   if (textEl) textEl.focus();
+  // Pin the window to full height so the vh-sized modal isn't cropped by a
+  // window the auto-fit had shrunk to a short list. relayout() does the grow
+  // (and ignores autoFitReady while locked, covering a freshly-opened window).
+  windowHeightLocked = true;
+  relayout();
 }
 
 function closeModal() {
   closeDtMenus();
   if (modal) modal.classList.add("hidden");
   modalEditId = null;
+  // Release the full-height pin and let the window shrink back to fit the list.
+  windowHeightLocked = false;
+  relayout();
   // If this edit came from the alert's "Custom…" button, let the main process
   // resume showing alerts (it was suppressed while editing).
   if (modalFromAlert) {
     modalFromAlert = false;
     electronAPI.alertEditDone?.();
   }
+}
+
+// Small transient pill that slides down from the top of the window.
+let toastTimer = null;
+function showToast(message) {
+  let host = document.getElementById("toastHost");
+  if (!host) {
+    host = document.createElement("div");
+    host.id = "toastHost";
+    host.className = "toast-host";
+    document.body.appendChild(host);
+  }
+  host.innerHTML = "";
+  const toast = document.createElement("div");
+  toast.className = "toast";
+  toast.textContent = message;
+  host.appendChild(toast);
+  requestAnimationFrame(() => toast.classList.add("show")); // animate in
+  if (toastTimer) clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => {
+    toast.classList.remove("show");
+    setTimeout(() => toast.remove(), 250);
+  }, 1900);
 }
 
 async function saveModal() {
@@ -1618,15 +1817,17 @@ async function saveModal() {
   if (when <= new Date()) return showError(t("alert-past-time"));
 
   const payload = { text, time: when.toISOString(), emoji, tags, favorite, recurrence };
+  const isNew = !(modalMode === "edit" && modalEditId);
   try {
-    if (modalMode === "edit" && modalEditId) {
-      await electronAPI.updateReminder(modalEditId, payload);
-    } else {
+    if (isNew) {
       payload.done = false;
       await electronAPI.addReminder(payload);
+    } else {
+      await electronAPI.updateReminder(modalEditId, payload);
     }
     closeModal();
     reload();
+    if (isNew) showToast(t("toast-created"));
   } catch (err) {
     console.error("save reminder failed", err);
     showError(t("alert-save-failed"));
@@ -1722,6 +1923,9 @@ function updateAllTranslations() {
   set(".delete-history-section h3", t("delete-history-title"));
   const deleteBtn = document.getElementById("deleteHistoryBtn");
   if (deleteBtn) deleteBtn.textContent = t("delete-btn");
+  const histSelectAllLabel = document.getElementById("histSelectAllLabel");
+  if (histSelectAllLabel) histSelectAllLabel.textContent = t("select-all");
+  updateHistSelectionUI();
   set(".delete-confirm p", t("delete-confirm-msg"));
   const confirmDeleteBtn = document.getElementById("confirmDelete");
   const cancelDeleteBtn = document.getElementById("cancelDelete");
@@ -1748,6 +1952,12 @@ function updateAllTranslations() {
   const openPathBtn = document.getElementById("openPathBtn");
   if (changePathBtn) changePathBtn.textContent = t("change-path-btn");
   if (openPathBtn) openPathBtn.textContent = t("open-path-btn");
+  const backupLabel = document.getElementById("backupLabel");
+  if (backupLabel) backupLabel.textContent = t("backup-label");
+  const backupDesc = document.getElementById("backupDesc");
+  if (backupDesc) backupDesc.textContent = t("backup-desc");
+  const openBackupsBtn = document.getElementById("openBackupsBtn");
+  if (openBackupsBtn) openBackupsBtn.textContent = t("open-backups-btn");
   set(".language-card p", t("language-label"));
   document.querySelectorAll(".lang-btn").forEach((btn) => {
     if (btn.dataset.lang === "en") btn.textContent = t("lang-en");
@@ -1912,6 +2122,51 @@ if (document.getElementById("deleteHistoryBtn")) {
   });
 }
 
+// Completed-tab multi-select: "Select all" + "Delete selected".
+const histSelectAll = document.getElementById("histSelectAll");
+if (histSelectAll) {
+  histSelectAll.addEventListener("change", () => {
+    const select = histSelectAll.checked;
+    historyView.forEach((r) => {
+      if (select) historySelection.add(r.id);
+      else historySelection.delete(r.id);
+    });
+    document
+      .querySelectorAll("#historyList .select-box")
+      .forEach((cb) => (cb.checked = select));
+    updateHistSelectionUI();
+  });
+}
+
+const deleteSelectedBtn = document.getElementById("deleteSelectedBtn");
+if (deleteSelectedBtn) {
+  let armed = false;
+  let armTimer = null;
+  const disarm = () => {
+    armed = false;
+    if (armTimer) clearTimeout(armTimer);
+    deleteSelectedBtn.classList.remove("armed");
+    updateHistSelectionUI(); // restores the "Delete selected (N)" label
+  };
+  deleteSelectedBtn.addEventListener("click", async () => {
+    if (historySelection.size === 0) return;
+    if (!armed) {
+      armed = true;
+      deleteSelectedBtn.classList.add("armed");
+      deleteSelectedBtn.textContent = `${t("confirm-delete")} (${historySelection.size})`;
+      armTimer = setTimeout(disarm, 3000);
+      return;
+    }
+    if (armTimer) clearTimeout(armTimer);
+    armed = false;
+    deleteSelectedBtn.classList.remove("armed");
+    for (const id of [...historySelection])
+      await electronAPI.deleteReminder(id);
+    historySelection.clear();
+    await loadHistoryFiltered();
+  });
+}
+
 // Language
 document.querySelectorAll(".lang-btn").forEach((btn) => {
   if (btn.dataset.lang === currentLang) btn.classList.add("active");
@@ -2070,6 +2325,13 @@ document.getElementById("openPathBtn")?.addEventListener("click", async () => {
     await electronAPI.openFolder();
   } catch (err) {
     console.error("openFolder failed", err);
+  }
+});
+document.getElementById("openBackupsBtn")?.addEventListener("click", async () => {
+  try {
+    await electronAPI.openBackupsFolder();
+  } catch (err) {
+    console.error("openBackupsFolder failed", err);
   }
 });
 

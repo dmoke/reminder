@@ -305,7 +305,7 @@
         meta.appendChild(el("span", "alert-chip", String(tag)));
       });
       if (r.recurrence !== "none") {
-        meta.appendChild(el("span", "alert-chip alert-chip-recurring", "↻ " + s("recurring")));
+        meta.appendChild(el("span", "alert-chip alert-chip-recurring", "⟳ " + s("recurring")));
       }
       row.appendChild(meta);
     }

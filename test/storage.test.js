@@ -286,3 +286,37 @@ test("writeFile leaves no leftover .tmp file after a successful write", (t) => {
   const tmpFiles = listDir(dir).filter((name) => name.endsWith(".tmp"));
   assert.deepEqual(tmpFiles, [], "no .tmp files should remain after successful writes");
 });
+
+test("valid JSON that is not an array is quarantined to a *.bak file and getActive() returns []", (t) => {
+  const dir = makeTempDir(t);
+
+  // A file that parses fine but is the wrong shape (e.g. a hand-edited or
+  // legacy file, or a bad restore) must not flow through as live data and crash
+  // the scheduler — it should be treated like corruption.
+  const activePath = path.join(dir, "reminders.json");
+  fs.writeFileSync(activePath, '{"oops":"not an array"}');
+
+  const originalError = console.error;
+  console.error = () => {};
+  let storage;
+  try {
+    storage = new Storage(dir);
+  } finally {
+    console.error = originalError;
+  }
+
+  assert.deepEqual(storage.getActive(), [], "getActive() should recover with []");
+  const baks = listDir(dir).filter((name) => /^reminders\.json\.\d+\.bak$/.test(name));
+  assert.equal(baks.length, 1, "the wrong-shape file should be quarantined to a .bak");
+  assert.equal(
+    fs.readFileSync(path.join(dir, baks[0]), "utf8"),
+    '{"oops":"not an array"}',
+    "original content should be preserved in the backup",
+  );
+  assert.deepEqual(readJSON(activePath), [], "reminders.json rewritten as an empty array");
+
+  // The recovered store is usable (the crash this guards against was push on a
+  // non-array).
+  storage.add({ id: "ok", text: "still works" });
+  assert.deepEqual(storage.getActive().map((r) => r.id), ["ok"]);
+});

@@ -308,6 +308,9 @@
   flex-direction: column;
   gap: 4px;
   overflow-y: auto;
+  /* Keep the wheel/scroll inside this list — don't chain to the calendar/page
+     behind the popup once we hit the top/bottom edge. */
+  overscroll-behavior: contain;
   min-height: 0;
 }
 

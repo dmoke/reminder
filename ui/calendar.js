@@ -147,6 +147,10 @@
     root.appendChild(grid);
 
     container.appendChild(root);
+
+    // Tell the host the calendar's real layout now exists, so it can re-fit the
+    // window. Fires on the initial mount and on every month-nav/Today remount.
+    if (typeof options.onRendered === "function") options.onRendered();
   }
 
   // ---------------------------------------------------------------------------
@@ -543,7 +547,13 @@
     var onKey = function (ev) {
       if (ev.key === "Escape" || ev.keyCode === 27) closeDayPopup();
     };
-    var onScrollResize = function () {
+    var onScrollResize = function (ev) {
+      // Scrolling the popup's OWN list must not dismiss it — only scrolling the
+      // calendar/page behind it should. The listener is on window (capture), so
+      // it also sees the inner list's scroll; ignore those.
+      if (ev && ev.type === "scroll" && ev.target && pop.contains(ev.target)) {
+        return;
+      }
       closeDayPopup();
     };
 

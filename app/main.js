@@ -12,15 +12,25 @@ const { v4: uuidv4 } = require("uuid");
 
 const Config = require("./config");
 const Storage = require("./storage");
+const Backup = require("./backup");
 const Scheduler = require("./scheduler");
 const { createTray } = require("./tray");
 const { nextOccurrence, RECURRENCES } = require("./recurrence");
 
+// Read straight from the app's package.json so the version stamped into backups
+// is the real app version (and unambiguous in dev, where app.getVersion() can
+// report Electron's version instead).
+const APP_VERSION = require("../package.json").version;
 const appIcon = path.join(__dirname, "assets", "icon.ico");
 const CSP =
   "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; media-src 'self' data:;";
 const DISMISS_SNOOZE_MS = 5 * 60 * 1000;
 const RAISE_THROTTLE_MS = 20 * 1000;
+// The main window auto-fits its height to the reminder list: it shrinks down to
+// roughly the page chrome when nearly empty and grows up to this cap, after
+// which the list scrolls internally. (Renderer mirrors WIN_MAX_HEIGHT.)
+const WIN_MAX_HEIGHT = 920;
+const WIN_MIN_HEIGHT = 360;
 
 // User-facing strings for the alert window (the main process owns this window,
 // so it localizes it directly from the persisted language preference).
@@ -29,7 +39,7 @@ const ALERT_STRINGS = {
     title: "Reminder",
     "due-now": "Due now",
     "overdue-by": "Overdue by",
-    complete: "Complete",
+    complete: "✔ Complete",
     snooze: "Snooze",
     dismiss: "Dismiss",
     "open-app": "Open app",
@@ -50,7 +60,7 @@ const ALERT_STRINGS = {
     title: "Нагадування",
     "due-now": "Час настав",
     "overdue-by": "Прострочено на",
-    complete: "Виконати",
+    complete: "✔ Виконати",
     snooze: "Відкласти",
     dismiss: "Закрити",
     "open-app": "Відкрити застосунок",
@@ -116,6 +126,12 @@ function initApp() {
     config.openAtLogin = true;
     Config.save(config);
   }
+  // Snapshot the on-disk data BEFORE Storage opens it. This is the safety net
+  // for "I lost my stuff after the update": a separate, shareable, versioned
+  // backup of the exact bytes the previous version left — including a corrupt
+  // file (which Storage would otherwise rename away on construction). Forced
+  // whenever the app version changed, so every update is captured.
+  Backup.safeBackupOnStartup(config.dataPath, APP_VERSION);
   storage = new Storage(config.dataPath, notifyRefresh);
   scheduler = new Scheduler(storage, handleDue);
   scheduler.start();
@@ -142,9 +158,9 @@ function openMainWindow() {
   }
   mainWindow = new BrowserWindow({
     width: 1140,
-    height: 920,
+    height: WIN_MAX_HEIGHT,
     minWidth: 1020,
-    minHeight: 620,
+    minHeight: WIN_MIN_HEIGHT,
     icon: appIcon,
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
@@ -214,7 +230,7 @@ function openEditModalFor(reminder) {
 function ensureAlertWindow() {
   if (alertWindow && !alertWindow.isDestroyed()) return;
   alertReady = false;
-  alertWindow = new BrowserWindow({
+  const win = new BrowserWindow({
     width: 460,
     height: 560,
     resizable: true,
@@ -232,19 +248,32 @@ function ensureAlertWindow() {
       nodeIntegration: false,
     },
   });
-  hardenWebContents(alertWindow);
-  alertWindow.setAlwaysOnTop(true, "screen-saver");
-  alertWindow.setVisibleOnAllWorkspaces(true);
-  alertWindow.loadFile(path.join(__dirname, "..", "ui", "alert.html"));
-  alertWindow.webContents.on("did-finish-load", () => {
+  alertWindow = win;
+  hardenWebContents(win);
+  win.setAlwaysOnTop(true, "screen-saver");
+  win.setVisibleOnAllWorkspaces(true);
+  win.loadFile(path.join(__dirname, "..", "ui", "alert.html"));
+  win.webContents.on("did-finish-load", () => {
+    // Ignore a late load event from a window we have already replaced.
+    if (alertWindow !== win) return;
     alertReady = true;
     // Now that the page is loaded, perform the first send + raise (avoids
     // briefly flashing a blank always-on-top window before content paints).
     if (currentDue.length) pushAlert(currentDue);
   });
-  alertWindow.on("closed", () => {
+  win.on("closed", () => {
+    // A "closed" from a window we already superseded must not clobber its
+    // successor's state — only react if this is still the live window.
+    if (alertWindow !== win) return;
     alertWindow = null;
     alertReady = false;
+    // The window that was showing `lastDueKey` is gone. Closing it (e.g. with
+    // the OS "X") does NOT resolve the reminders, so they stay due and a fresh
+    // window is recreated on the next tick. Clear the cache so pushAlert()
+    // treats the still-due set as new and re-sends `alert:data`; otherwise the
+    // unchanged key short-circuits sendAlertData() and the new window renders
+    // empty.
+    lastDueKey = "";
   });
 }
 
@@ -434,6 +463,19 @@ function applyLoginItemSetting() {
 
 ipcMain.handle("get-reminders", () => storage.getActive());
 ipcMain.handle("get-history", () => storage.getHistory());
+// Renderer asks the window to match its content height; we clamp to the window
+// min/max and translate the content height into a total (frame-inclusive) size.
+ipcMain.handle("fit-window-height", (event, contentHeight) => {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (mainWindow.isMaximized() || mainWindow.isFullScreen()) return;
+  const h = Math.round(Number(contentHeight));
+  if (!Number.isFinite(h) || h <= 0) return;
+  const [w, totalH] = mainWindow.getSize();
+  const [, contentH] = mainWindow.getContentSize();
+  const frame = totalH - contentH; // title bar + borders
+  const target = Math.max(WIN_MIN_HEIGHT, Math.min(WIN_MAX_HEIGHT, h + frame));
+  if (Math.abs(target - totalH) > 1) mainWindow.setSize(w, target, false);
+});
 ipcMain.handle("add-reminder", (event, reminder) => {
   const clean = sanitizeNewReminder(reminder);
   if (!clean) throw new Error("Invalid reminder");
@@ -480,6 +522,10 @@ ipcMain.handle("choose-folder", async () => {
   if (result.canceled) return null;
   config.dataPath = result.filePaths[0];
   Config.save(config);
+  // Apply the standard backup policy to the newly-chosen folder: a brand-new
+  // folder gets an "initial" snapshot; one that already holds a recent
+  // same-version backup is left as-is (it is already protected).
+  Backup.safeBackupOnStartup(config.dataPath, APP_VERSION);
   storage = new Storage(config.dataPath, notifyRefresh);
   scheduler.stop();
   scheduler = new Scheduler(storage, handleDue);
@@ -490,6 +536,21 @@ ipcMain.handle("choose-folder", async () => {
 ipcMain.handle("open-folder", async () => {
   if (!config.dataPath || !fs.existsSync(config.dataPath)) return false;
   await shell.openPath(config.dataPath);
+  return true;
+});
+ipcMain.handle("open-backups-folder", async () => {
+  if (!config.dataPath) return false;
+  const dir = path.join(config.dataPath, "backups");
+  // The folder normally exists (a backup is taken on launch); ensure it anyway
+  // so the button always lands somewhere useful, falling back to the data folder.
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+  } catch {
+    // ignore — handled by the existence check below
+  }
+  const target = fs.existsSync(dir) ? dir : config.dataPath;
+  if (!fs.existsSync(target)) return false;
+  await shell.openPath(target);
   return true;
 });
 

@@ -63,7 +63,7 @@
             ★ Favorites
           </button>
           <button id="recurFilterBtn" class="filter-toggle" data-active="false">
-            🔁 Repeating
+            ⟳ Repeating
           </button>
           <div class="view-toggle" role="group">
             <button
@@ -101,7 +101,7 @@
             ★ Favorites
           </button>
           <button id="calRecurBtn" class="filter-toggle" data-active="false">
-            🔁 Repeating
+            ⟳ Repeating
           </button>
         </div>
         <div id="calendarContainer"></div>
@@ -147,7 +147,16 @@
             ★ Favorites
           </button>
           <button id="histRecurBtn" class="filter-toggle" data-active="false">
-            🔁 Repeating
+            ⟳ Repeating
+          </button>
+        </div>
+        <div class="history-select-bar">
+          <label class="select-all-label">
+            <input type="checkbox" id="histSelectAll" />
+            <span id="histSelectAllLabel">Select all</span>
+          </label>
+          <button id="deleteSelectedBtn" class="delete-btn" disabled>
+            Delete selected (0)
           </button>
         </div>
         <div class="sort-header hidden" id="historySortHeader"></div>
@@ -168,6 +177,18 @@
               <button id="openPathBtn" class="secondary-btn">Open</button>
             </div>
           </div>
+        </div>
+        <div class="storage-card storage-card--panel storage-card--stack">
+          <div class="storage-row">
+            <p id="backupLabel">Backups:</p>
+            <button id="openBackupsBtn" class="secondary-btn">
+              Open backups folder
+            </button>
+          </div>
+          <p id="backupDesc" class="storage-subtext">
+            Latest snapshot (reminder-backup-&lt;date&gt;.json), refreshed on
+            launch and after updates. Share it to restore your reminders.
+          </p>
         </div>
         <div class="language-card storage-card--panel">
           <p>Language:</p>
@@ -219,10 +240,10 @@
             <label id="modalWhenLabel">Date &amp; time</label>
             <div class="dt-head-actions">
               <button type="button" id="dtNowBtn" class="dt-cal-btn dt-now-btn" title="Set to the current time">
-                🕒 <span id="dtNowBtnText">Now</span>
+                ◷ <span id="dtNowBtnText">Now</span>
               </button>
               <button type="button" id="dtCalendarBtn" class="dt-cal-btn" title="Pick from calendar">
-                📅 <span id="dtCalendarBtnText">Calendar</span>
+                ⊞ <span id="dtCalendarBtnText">Calendar</span>
               </button>
               <input
                 type="date"

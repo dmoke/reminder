@@ -215,12 +215,16 @@ h1 {
 .list-grid {
   display: grid;
   gap: 16px;
-  /* Scrollable list area: caps the height to roughly 11–12 rows, then fades
-     out at the bottom so it reads as "there's more to scroll". The padding-
-     bottom keeps the last card clear of the fade once you reach the end. */
-  max-height: calc(100vh - 310px);
   overflow-y: auto;
-  padding: 6px 8px 30px;
+  padding: 6px 8px;
+}
+
+/* The window auto-fits the list; only when there are more rows than fit (the
+   list is height-capped by JS) do we scroll and fade the bottom edge so it
+   reads as "there's more below". The extra bottom padding keeps the last card
+   clear of the fade once you scroll to the end. */
+.list-grid.is-capped {
+  padding-bottom: 30px;
   -webkit-mask-image: linear-gradient(
     to bottom,
     #000 calc(100% - 30px),
@@ -466,6 +470,20 @@ button,
 .storage-card--panel {
   margin-top: 0;
   padding: 24px;
+}
+
+/* Vertical variant: a label, a wrapping description, then an action row. */
+.storage-card--stack {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 12px;
+}
+
+.storage-subtext {
+  margin: 0;
+  color: #64748b;
+  font-size: 0.85rem;
+  line-height: 1.5;
 }
 
 .storage-row {
@@ -754,8 +772,50 @@ select {
   font-weight: 600;
 }
 
-.delete-btn:hover {
+.delete-btn:hover:not(:disabled) {
   background: #fee2e2;
+}
+
+.delete-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* Armed (one click away from deleting the ticked rows). */
+.delete-btn.armed {
+  background: #dc2626;
+  color: #fff;
+  border-color: #dc2626;
+}
+
+/* Completed-tab selection bar: "Select all" on the left, "Delete selected"
+   on the right, sitting just above the list. */
+.history-select-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 2px 0 10px;
+}
+
+.select-all-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.85rem;
+  color: #475569;
+  cursor: pointer;
+  user-select: none;
+}
+
+.select-all-label input[type="checkbox"],
+.card .select-box {
+  width: 16px;
+  height: 16px;
+  accent-color: #2563eb;
+  cursor: pointer;
+  flex: 0 0 auto;
+  margin: 0;
 }
 
 .delete-confirm {
@@ -789,6 +849,41 @@ select {
 
 .hidden {
   display: none;
+}
+
+/* Transient confirmation pill, centered at the top of the window. */
+.toast-host {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  justify-content: center;
+  pointer-events: none;
+  z-index: 2000;
+}
+
+.toast {
+  margin-top: 14px;
+  padding: 9px 18px;
+  background: #ecfdf5;
+  color: #065f46;
+  border: 1px solid rgba(16, 185, 129, 0.3);
+  border-radius: 999px;
+  box-shadow: 0 14px 34px rgba(15, 23, 42, 0.14);
+  font-size: 0.9rem;
+  font-weight: 600;
+  white-space: nowrap;
+  opacity: 0;
+  transform: translateY(-14px);
+  transition:
+    opacity 0.22s ease,
+    transform 0.22s ease;
+}
+
+.toast.show {
+  opacity: 1;
+  transform: translateY(0);
 }
 
 .language-card {
@@ -1666,8 +1761,8 @@ select {
   color: #713f12;
 }
 .qt-afternoon {
-  background: linear-gradient(135deg, #fb923c, #f97316);
-  color: #7c2d12;
+  background: linear-gradient(135deg, #566796, #405979);
+  color: #ffffff;
 }
 .qt-evening {
   background: linear-gradient(135deg, #6366f1, #312e81);

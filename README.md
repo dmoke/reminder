@@ -14,6 +14,12 @@ Reminders is a Windows tray-based desktop reminders app built with Electron. It 
 
 After installing, Reminders launches into the system tray and (by default) starts automatically with Windows. You can turn auto-start off in **Settings**.
 
+> **Re-running the installer:** if Reminders is already installed, the installer
+> asks you to confirm before continuing — choosing **OK** updates it in place
+> (your reminders and settings are kept) and **Cancel** stops. Your reminders
+> live in the data folder you chose and are never touched by the installer or
+> uninstaller.
+
 ## Features
 
 - **System tray app** — the app lives in the Windows tray. Closing the main window hides it; the tray icon and scheduler keep running in the background. The tray menu offers **Open Reminders**, **Add Reminder**, and **Quit**, and left-clicking the tray icon opens the main window.
@@ -93,6 +99,42 @@ The [`.github/workflows/release.yml`](.github/workflows/release.yml) workflow bu
 
 You can change the data folder at any time from the app's Settings panel, and open the current folder in File Explorer.
 
+### Backups
+
+To guard against data loss across updates, the app keeps an automatic backup in a
+`backups/` subfolder of your data folder. The backup is a single, self-describing
+JSON file named `reminder-backup-<timestamp>.json` that bundles **both** data
+files together with the app and format versions that wrote it:
+
+```json
+{
+  "format": "reminder-backup",
+  "formatVersion": 1,
+  "appVersion": "1.2.0",
+  "dataVersion": "1.1.0",
+  "createdAt": "2026-06-28T12:00:00.000Z",
+  "reason": "version-change",
+  "counts": { "reminders": 12, "history": 340 },
+  "data": { "reminders": [ ... ], "history": [ ... ] }
+}
+```
+
+- **When backups are taken** — on startup at most once every 12 hours, and
+  **always** immediately when the app version changes, so the exact state from
+  before an update is captured before the new version touches anything. (For
+  that pre-update snapshot, `appVersion` is the new build that wrote the file
+  while `dataVersion` is the older version the data still belongs to.) A
+  partially-broken file is preserved verbatim rather than discarded.
+- **Rotation** — only the most recent snapshot is kept, so the folder never
+  accumulates files. Right after an update that single file is the pre-update
+  snapshot (captured before the new version touched anything); it refreshes to
+  the current state on a later launch.
+- **Restoring** — open the `backups/` folder (Settings → **Open backups
+  folder**), and copy the `reminders` / `history` arrays from the snapshot's
+  `data` field back into `reminders.json` / `history.json` (with the app closed).
+  If you hit a problem after an update, sharing the backup file is enough to
+  recover or diagnose your reminders.
+
 ## Project structure
 
 ```
@@ -100,6 +142,7 @@ reminder/
 ├── app/                 # Electron main process
 │   ├── main.js          # App entry: windows, IPC handlers, lifecycle, CSP
 │   ├── storage.js       # JSON persistence (reminders.json / history.json)
+│   ├── backup.js        # Versioned snapshots of the dataset (backups/ folder)
 │   ├── scheduler.js     # 1s polling + due-reminder toast notifications
 │   ├── tray.js          # System tray icon and context menu
 │   ├── config.js        # Loads/saves config.json in userData

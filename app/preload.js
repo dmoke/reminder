@@ -13,10 +13,12 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.invoke("archive-reminder", id, expectedTime),
   deleteReminder: (id) => ipcRenderer.invoke("delete-reminder", id),
   deleteTag: (tag) => ipcRenderer.invoke("delete-tag", tag),
+  fitWindowHeight: (h) => ipcRenderer.invoke("fit-window-height", h),
   openAddWindow: () => ipcRenderer.invoke("open-add-window"),
   getConfig: () => ipcRenderer.invoke("get-config"),
   chooseFolder: () => ipcRenderer.invoke("choose-folder"),
   openFolder: () => ipcRenderer.invoke("open-folder"),
+  openBackupsFolder: () => ipcRenderer.invoke("open-backups-folder"),
   setLoginItem: (enabled) => ipcRenderer.invoke("set-login-item", enabled),
   setLanguage: (lang) => ipcRenderer.invoke("set-language", lang),
   onRefreshReminders: (callback) =>
