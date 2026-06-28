@@ -22,6 +22,9 @@ contextBridge.exposeInMainWorld("electronAPI", {
   onRefreshReminders: (callback) =>
     ipcRenderer.on("refresh-reminders", callback),
   onOpenAddModal: (callback) => ipcRenderer.on("open-add-modal", callback),
+  onOpenEditModal: (callback) =>
+    ipcRenderer.on("open-edit-modal", (event, reminder) => callback(reminder)),
+  alertEditDone: () => ipcRenderer.invoke("alert:edit-done"),
 });
 
 // Always-on-top alert window API
@@ -31,6 +34,7 @@ contextBridge.exposeInMainWorld("alertAPI", {
   complete: (id, expectedTime) =>
     ipcRenderer.invoke("alert:complete", id, expectedTime),
   snooze: (id, isoTime) => ipcRenderer.invoke("alert:snooze", id, isoTime),
+  edit: (id) => ipcRenderer.invoke("alert:edit", id),
   dismiss: () => ipcRenderer.invoke("alert:dismiss"),
   openApp: () => ipcRenderer.invoke("alert:open-app"),
 });

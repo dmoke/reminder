@@ -41,6 +41,7 @@
     return {
       id: r && r.id != null ? r.id : "",
       text: r && r.text != null ? r.text : "",
+      emoji: r && r.emoji != null ? r.emoji : "",
       time: r && r.time != null ? r.time : "",
       tags: r && Array.isArray(r.tags) ? r.tags : [],
       favorite: !!(r && r.favorite),
@@ -120,6 +121,23 @@
       } else {
         now.setHours(9, 0, 0, 0);
       }
+      return now.toISOString();
+    }
+    if (kind === "2d" || kind === "1w") {
+      // Day-based: preserve the reminder's own time-of-day when available.
+      var srcDay = baseIso ? new Date(baseIso) : null;
+      now.setDate(now.getDate() + (kind === "1w" ? 7 : 2));
+      if (srcDay && !isNaN(srcDay.getTime())) {
+        now.setHours(srcDay.getHours(), srcDay.getMinutes(), 0, 0);
+      }
+      return now.toISOString();
+    }
+    if (kind === "1mo") {
+      now.setMonth(now.getMonth() + 1);
+      return now.toISOString();
+    }
+    if (kind === "1y") {
+      now.setFullYear(now.getFullYear() + 1);
       return now.toISOString();
     }
     // Fallback: 10 minutes.
@@ -228,7 +246,11 @@
       { kind: "10m", label: s("snooze-10m") },
       { kind: "1h", label: s("snooze-1h") },
       { kind: "3h", label: s("snooze-3h") },
-      { kind: "tomorrow", label: s("snooze-tomorrow") }
+      { kind: "tomorrow", label: s("snooze-tomorrow") },
+      { kind: "2d", label: s("snooze-2d") },
+      { kind: "1w", label: s("snooze-1w") },
+      { kind: "1mo", label: s("snooze-1mo") },
+      { kind: "1y", label: s("snooze-1y") }
     ];
 
     options.forEach(function (opt) {
@@ -240,6 +262,21 @@
       wrap.appendChild(btn);
     });
 
+    // Last option: open the app's edit modal to pick a custom time. The main
+    // process suppresses this alert while editing so it can't cover the modal.
+    if (typeof window.alertAPI.edit === "function") {
+      var customBtn = el(
+        "button",
+        "alert-btn alert-btn-snooze alert-btn-custom",
+        s("snooze-custom"),
+      );
+      customBtn.type = "button";
+      customBtn.addEventListener("click", function () {
+        callApi(window.alertAPI.edit(id));
+      });
+      wrap.appendChild(customBtn);
+    }
+
     return wrap;
   }
 
@@ -248,7 +285,7 @@
 
     // Header line: text + favorite star.
     var head = el("div", "alert-row-head");
-    var title = el("div", "alert-row-text", r.text);
+    var title = el("div", "alert-row-text", (r.emoji ? r.emoji + " " : "") + r.text);
     head.appendChild(title);
     if (r.favorite) {
       head.appendChild(el("span", "alert-star", "★"));

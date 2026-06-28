@@ -17,6 +17,8 @@ if (!electronAPI) {
     setLanguage: async () => "en",
     onRefreshReminders: () => {},
     onOpenAddModal: () => {},
+    onOpenEditModal: () => {},
+    alertEditDone: async () => {},
   };
 }
 
@@ -30,15 +32,102 @@ const viewButtons = Array.from(document.querySelectorAll(".view-button"));
 let allReminders = [];
 let allHistory = [];
 let currentLang = localStorage.getItem("language") || "en";
-let viewMode = localStorage.getItem("viewMode") || "grid";
+let viewMode = localStorage.getItem("viewMode") || "list";
 let favFilter = false;
+let recurFilter = false;
 let tagFilterValue = "";
+// Calendar view has its own independent copy of the same filters.
+let calFav = false;
+let calRecur = false;
+let calTagValue = "";
+// Completed tab mirrors the active filters with its own state.
+let histFav = false;
+let histRecur = false;
+let histTagValue = "";
+// Sort state per list (key: "due" | "created" | "title").
+let activeSort = { key: "due", dir: "asc" };
+let histSort = { key: "due", dir: "desc" };
 let currentView = "activePanel";
 let modalMode = "create"; // 'create' | 'edit' | 'duplicate'
 let modalEditId = null;
 let modalSelectedTags = new Set();
 let modalFavorite = false;
-let modalManageTags = false;
+let modalEmoji = "";
+// True when the edit modal was opened from the alert's "Custom…" button, so the
+// main process knows to resume alerts once we're done.
+let modalFromAlert = false;
+
+// ---- tags: defaults + colors -----------------------------------------------
+
+// Always-available starter tags so a fresh install isn't a blank slate.
+const DEFAULT_TAGS = ["work", "home", "urgent"];
+
+// Hand-picked colors for the defaults; everything else hashes into the palette.
+const TAG_COLORS = {
+  work: { bg: "#dbeafe", fg: "#1e40af", dot: "#3b82f6" },
+  home: { bg: "#dcfce7", fg: "#166534", dot: "#22c55e" },
+  urgent: { bg: "#fee2e2", fg: "#b91c1c", dot: "#ef4444" },
+};
+const TAG_PALETTE = [
+  { bg: "#ede9fe", fg: "#6d28d9", dot: "#8b5cf6" },
+  { bg: "#fce7f3", fg: "#be185d", dot: "#ec4899" },
+  { bg: "#ffedd5", fg: "#c2410c", dot: "#f97316" },
+  { bg: "#cffafe", fg: "#0e7490", dot: "#06b6d4" },
+  { bg: "#fef9c3", fg: "#854d0e", dot: "#eab308" },
+  { bg: "#e0e7ff", fg: "#4338ca", dot: "#6366f1" },
+  { bg: "#fae8ff", fg: "#a21caf", dot: "#d946ef" },
+  { bg: "#d1fae5", fg: "#047857", dot: "#10b981" },
+];
+
+function tagColor(tag) {
+  const key = String(tag).toLowerCase();
+  if (TAG_COLORS[key]) return TAG_COLORS[key];
+  let h = 0;
+  for (let i = 0; i < key.length; i++) h = (h * 31 + key.charCodeAt(i)) >>> 0;
+  return TAG_PALETTE[h % TAG_PALETTE.length];
+}
+
+// Custom tags persist in localStorage so they stay pickable before they are
+// attached to any reminder (the popup can create them ahead of time).
+function getCustomTags() {
+  try {
+    const arr = JSON.parse(localStorage.getItem("customTags") || "[]");
+    return Array.isArray(arr) ? arr : [];
+  } catch {
+    return [];
+  }
+}
+function setCustomTags(arr) {
+  localStorage.setItem("customTags", JSON.stringify([...new Set(arr)]));
+}
+function addCustomTag(tag) {
+  const arr = getCustomTags();
+  if (!arr.includes(tag)) {
+    arr.push(tag);
+    setCustomTags(arr);
+  }
+}
+function removeCustomTag(tag) {
+  setCustomTags(getCustomTags().filter((x) => x !== tag));
+}
+
+// Localized name tables for the date hints + the month dropdown.
+const MONTH_NAMES = {
+  en: ["January", "February", "March", "April", "May", "June", "July",
+    "August", "September", "October", "November", "December"],
+  uk: ["Січень", "Лютий", "Березень", "Квітень", "Травень", "Червень", "Липень",
+    "Серпень", "Вересень", "Жовтень", "Листопад", "Грудень"],
+};
+const WEEKDAY_NAMES = {
+  en: ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"],
+  uk: ["Неділя", "Понеділок", "Вівторок", "Середа", "Четвер", "П'ятниця", "Субота"],
+};
+function monthName(i) {
+  return (MONTH_NAMES[currentLang] || MONTH_NAMES.en)[i] || "";
+}
+function weekdayName(i) {
+  return (WEEKDAY_NAMES[currentLang] || WEEKDAY_NAMES.en)[i] || "";
+}
 
 // ---- small helpers ---------------------------------------------------------
 
@@ -51,14 +140,6 @@ function historySearchValue() {
 
 function pad2(n) {
   return String(n).padStart(2, "0");
-}
-
-function toDatetimeLocal(value) {
-  const d = new Date(value);
-  if (isNaN(d.getTime())) return "";
-  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}T${pad2(
-    d.getHours(),
-  )}:${pad2(d.getMinutes())}`;
 }
 
 function defaultModalTime() {
@@ -112,6 +193,91 @@ function makeEmptyState(message) {
   return el;
 }
 
+// ---- reminder preview modal -------------------------------------------------
+// Titles are truncated to one line; clicking a card/pill opens this read-only
+// preview so the full text + details are reachable, with just Close / Edit.
+
+let previewReminder = null;
+
+function buildPreviewBody(reminder) {
+  const body = document.getElementById("previewBody");
+  if (!body) return;
+  body.innerHTML = "";
+  const done = !!(reminder.done || reminder.completedAt);
+
+  const title = document.createElement("h3");
+  title.className = "preview-title";
+  title.textContent =
+    (reminder.emoji ? reminder.emoji + " " : "") + (reminder.text || "");
+  body.appendChild(title);
+
+  const when = document.createElement("p");
+  when.className = "preview-when";
+  if (done) {
+    when.textContent = reminder.completedAt
+      ? `${t("card-badge-completed")} · ${formatDate(reminder.completedAt)}`
+      : t("card-badge-completed");
+  } else {
+    when.textContent = `${t("card-due-prefix")} ${formatDate(reminder.time)}`;
+  }
+  body.appendChild(when);
+
+  if (reminder.createdAt) {
+    const created = document.createElement("p");
+    created.className = "preview-created";
+    created.textContent = `${t("preview-created")} · ${formatDate(reminder.createdAt)}`;
+    body.appendChild(created);
+  }
+
+  const recurrence = reminder.recurrence || "none";
+  if (recurrence !== "none") {
+    const rec = document.createElement("p");
+    rec.className = "preview-recur";
+    rec.textContent = "🔁 " + t("recur-" + recurrence);
+    body.appendChild(rec);
+  }
+
+  if (reminder.favorite) {
+    const fav = document.createElement("p");
+    fav.className = "preview-fav";
+    fav.textContent = "★ " + t("filter-favorites").replace("★ ", "");
+    body.appendChild(fav);
+  }
+
+  const tags = reminder.tags || [];
+  if (tags.length) {
+    const tagsEl = document.createElement("div");
+    tagsEl.className = "preview-tags";
+    tags.forEach((tag) => {
+      const chip = document.createElement("span");
+      chip.className = "tag-chip";
+      chip.textContent = "#" + tag;
+      const c = tagColor(tag);
+      chip.style.background = c.bg;
+      chip.style.color = c.fg;
+      tagsEl.appendChild(chip);
+    });
+    body.appendChild(tagsEl);
+  }
+}
+
+function openPreview(reminder) {
+  if (!reminder) return;
+  previewReminder = reminder;
+  buildPreviewBody(reminder);
+  const editBtn = document.getElementById("previewEdit");
+  if (editBtn) {
+    const done = !!(reminder.done || reminder.completedAt);
+    editBtn.textContent = done ? t("card-btn-duplicate") : t("card-btn-edit");
+  }
+  previewModal?.classList.remove("hidden");
+}
+
+function closePreview() {
+  previewModal?.classList.add("hidden");
+  previewReminder = null;
+}
+
 function formatDate(value) {
   return new Date(value).toLocaleString([], {
     weekday: "short",
@@ -122,6 +288,19 @@ function formatDate(value) {
   });
 }
 
+// Compact date (no time) for the "created" line; adds the year only if not this one.
+function formatCreated(value) {
+  const d = new Date(value);
+  if (isNaN(d.getTime())) return "";
+  const sameYear = d.getFullYear() === new Date().getFullYear();
+  return d.toLocaleDateString(
+    [],
+    sameYear
+      ? { month: "short", day: "numeric" }
+      : { year: "numeric", month: "short", day: "numeric" },
+  );
+}
+
 function formatRemainingTime(ms) {
   const totalSeconds = Math.floor(ms / 1000);
   const days = Math.floor(totalSeconds / 86400);
@@ -130,6 +309,82 @@ function formatRemainingTime(ms) {
   if (days > 0) return `${days}d ${hours}h`;
   if (hours > 0) return `${hours}h ${minutes}m`;
   return `${minutes}m`;
+}
+
+// Relative time bucket for the card badge / left-border color.
+// Returns: "overdue" | "today" | "week" | "month" | "year" | "later".
+function timeBucket(date, now) {
+  if (date < now) return "overdue";
+  const endOfToday = new Date(now);
+  endOfToday.setHours(23, 59, 59, 999);
+  if (date <= endOfToday) return "today";
+  // Current week ends Sunday (the app treats weeks as Monday-start).
+  const endOfWeek = new Date(now);
+  const mondayIndex = (endOfWeek.getDay() + 6) % 7; // 0=Mon … 6=Sun
+  endOfWeek.setDate(endOfWeek.getDate() + (6 - mondayIndex));
+  endOfWeek.setHours(23, 59, 59, 999);
+  if (date <= endOfWeek) return "week";
+  const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
+  if (date <= endOfMonth) return "month";
+  const endOfYear = new Date(now.getFullYear(), 11, 31, 23, 59, 59, 999);
+  if (date <= endOfYear) return "year";
+  return "later";
+}
+
+// ---- sorting ---------------------------------------------------------------
+
+// Comparator for the sortable list headers. "due" orders by reminder time,
+// which is exactly the today→week→month→year→later layer order.
+function compareReminders(a, b, sort) {
+  let cmp = 0;
+  if (sort.key === "title") {
+    cmp = (a.text || "").localeCompare(b.text || "");
+  } else if (sort.key === "created") {
+    cmp = new Date(a.createdAt || 0) - new Date(b.createdAt || 0);
+  } else {
+    cmp = new Date(a.time) - new Date(b.time);
+  }
+  return sort.dir === "desc" ? -cmp : cmp;
+}
+
+const SORT_COLUMNS = [
+  ["due", "sort-due"],
+  ["created", "sort-created"],
+  ["title", "sort-title"],
+];
+
+// Builds the clickable "column header" sort row for a list.
+function renderSortHeader(containerId, sort, onChange) {
+  const wrap = document.getElementById(containerId);
+  if (!wrap) return;
+  wrap.innerHTML = "";
+  SORT_COLUMNS.forEach(([key, labelKey]) => {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    const active = sort.key === key;
+    btn.className = "sort-col" + (active ? " active" : "");
+    const arrow = active ? (sort.dir === "asc" ? " ▲" : " ▼") : "";
+    btn.textContent = t(labelKey) + arrow;
+    btn.addEventListener("click", () => {
+      if (sort.key === key) {
+        sort.dir = sort.dir === "asc" ? "desc" : "asc";
+      } else {
+        sort.key = key;
+        sort.dir = "asc";
+      }
+      onChange();
+    });
+    wrap.appendChild(btn);
+  });
+}
+
+// Sort headers only make sense in list view.
+function syncSortHeaders() {
+  const show = viewMode === "list";
+  document.getElementById("activeSortHeader")?.classList.toggle("hidden", !show);
+  document
+    .getElementById("historySortHeader")
+    ?.classList.toggle("hidden", !show);
 }
 
 function getSnoozeTime(baseDate, type) {
@@ -175,6 +430,7 @@ const translations = {
     "search-active": "Search reminders...",
     "filter-all-tags": "All tags",
     "filter-favorites": "★ Favorites",
+    "filter-repeating": "🔁 Repeating",
     "view-list": "☰ List",
     "view-grid": "▦ Grid",
     "panel-history-title": "Completed reminders",
@@ -207,6 +463,13 @@ const translations = {
     "card-badge-overdue": "Overdue",
     "card-badge-upcoming": "Upcoming",
     "card-badge-completed": "Completed",
+    "bucket-overdue": "Overdue",
+    "bucket-today": "Today",
+    "bucket-week": "This week",
+    "bucket-month": "This month",
+    "bucket-year": "This year",
+    "bucket-later": "Later",
+    "card-created-prefix": "Created",
     "card-btn-edit": "Edit",
     "card-btn-complete": "Complete",
     "card-btn-duplicate": "Duplicate",
@@ -237,20 +500,43 @@ const translations = {
     "modal-favorite-label": "Mark as favorite",
     "modal-newtag-ph": "New tag",
     "modal-addtag": "Add",
-    "modal-managetags": "Edit tags (add / delete)",
+    "modal-managetags": "＋ New / manage",
     "modal-close": "Close",
     "tags-none": "No tags yet",
+    "tag-mgr-title": "Manage tags",
+    "tag-mgr-done": "Done",
+    "tag-default-note": "Built-in tag",
     "modal-cancel": "Cancel",
     "modal-save": "Save",
+    "preview-title": "Reminder",
+    "preview-close": "Close",
+    "preview-created": "Created",
+    "sort-due": "Due",
+    "sort-created": "Created",
+    "sort-title": "Title",
+    "dt-year": "Year",
+    "dt-month": "Month",
+    "dt-day": "Day",
+    "dt-hour": "Hour",
+    "dt-minute": "Min",
+    "dt-calendar": "Calendar",
+    "dt-calendar-title": "Pick from a calendar",
+    "dt-now": "Now",
+    "dt-now-title": "Set to the current time",
+    "dt-hint-invalid": "Pick a valid date",
+    "emoji-choose": "Choose emoji",
+    "emoji-none": "No emoji",
+    "quick-day-cap": "Jump to a day",
+    "quick-time-cap": "Time of day",
     "quick-today": "Later today",
     "quick-tomorrow": "Tomorrow",
     "quick-weekend": "This weekend",
     "quick-nextweek": "Next week",
     "quick-morning": "🌅 Before lunch",
-    "quick-midday": "🕛 Midday",
-    "quick-afternoon": "🌇 Afternoon",
+    "quick-midday": "☀️ Midday",
+    "quick-afternoon": "🌆 Afternoon",
     "quick-evening": "🌙 Evening",
-    "snooze-tomorrow": "📅 Tomorrow",
+    "snooze-tomorrow": "Tomorrow",
     "calendar-today": "Today",
     "calendar-more": "+{n} more",
     "empty-active": "No reminders yet. Add one to get started.",
@@ -278,8 +564,9 @@ const translations = {
     "panel-calendar-title": "Календар",
     "panel-calendar-desc": "Перегляньте всі свої плани одним поглядом.",
     "search-active": "Пошук нагадувань...",
-    "filter-all-tags": "Усі мітки",
+    "filter-all-tags": "Усі теги",
     "filter-favorites": "★ Обрані",
+    "filter-repeating": "🔁 З повтором",
     "view-list": "☰ Список",
     "view-grid": "▦ Сітка",
     "panel-history-title": "Завершені нагадування",
@@ -312,6 +599,13 @@ const translations = {
     "card-badge-overdue": "Прострочено",
     "card-badge-upcoming": "Заплановано",
     "card-badge-completed": "Завершено",
+    "bucket-overdue": "Прострочено",
+    "bucket-today": "Сьогодні",
+    "bucket-week": "Цього тижня",
+    "bucket-month": "Цього місяця",
+    "bucket-year": "Цього року",
+    "bucket-later": "Пізніше",
+    "card-created-prefix": "Створено",
     "card-btn-edit": "Редагувати",
     "card-btn-complete": "Виконати",
     "card-btn-duplicate": "Дублювати",
@@ -337,25 +631,48 @@ const translations = {
     "modal-text-ph": "Текст нагадування",
     "modal-when-label": "Дата та час",
     "modal-repeat-label": "Повторення",
-    "modal-tags-label": "Мітки",
+    "modal-tags-label": "Теги",
     "modal-tags-ph": "робота, дім, терміново",
     "modal-favorite-label": "Позначити як обране",
-    "modal-newtag-ph": "Нова мітка",
+    "modal-newtag-ph": "Новий тег",
     "modal-addtag": "Додати",
-    "modal-managetags": "Редагувати мітки (додати / видалити)",
+    "modal-managetags": "＋ Новий / керувати",
     "modal-close": "Закрити",
-    "tags-none": "Поки що немає міток",
+    "tags-none": "Поки що немає тегів",
+    "tag-mgr-title": "Керування тегами",
+    "tag-mgr-done": "Готово",
+    "tag-default-note": "Вбудований тег",
     "modal-cancel": "Скасувати",
     "modal-save": "Зберегти",
-    "quick-today": "Пізніше сьогодні",
+    "preview-title": "Нагадування",
+    "preview-close": "Закрити",
+    "preview-created": "Створено",
+    "sort-due": "Термін",
+    "sort-created": "Створено",
+    "sort-title": "Назва",
+    "dt-year": "Рік",
+    "dt-month": "Місяць",
+    "dt-day": "День",
+    "dt-hour": "Год",
+    "dt-minute": "Хв",
+    "dt-calendar": "Календар",
+    "dt-calendar-title": "Вибрати з календаря",
+    "dt-now": "Зараз",
+    "dt-now-title": "Встановити поточний час",
+    "dt-hint-invalid": "Виберіть коректну дату",
+    "emoji-choose": "Вибрати емодзі",
+    "emoji-none": "Без емодзі",
+    "quick-day-cap": "Обрати день",
+    "quick-time-cap": "Час доби",
+    "quick-today": "Сьогодні",
     "quick-tomorrow": "Завтра",
-    "quick-weekend": "На вихідних",
-    "quick-nextweek": "Наступного тижня",
+    "quick-weekend": "Вихідні",
+    "quick-nextweek": "Наст. тиждень",
     "quick-morning": "🌅 До обіду",
-    "quick-midday": "🕛 Опівдні",
-    "quick-afternoon": "🌇 Пополудні",
+    "quick-midday": "☀️ Опівдні",
+    "quick-afternoon": "🌆 Пополудні",
     "quick-evening": "🌙 Увечері",
-    "snooze-tomorrow": "📅 Завтра",
+    "snooze-tomorrow": "Завтра",
     "calendar-today": "Сьогодні",
     "calendar-more": "+{n} ще",
     "empty-active": "Поки що немає нагадувань. Додайте перше.",
@@ -408,9 +725,15 @@ function createCard(reminder, isHistory) {
   const titleRow = document.createElement("div");
   titleRow.className = "card-title-row";
   const title = document.createElement("h3");
-  title.className = "card-title";
-  title.textContent = reminder.text;
+  title.className = "card-title card-title--clickable";
+  title.textContent =
+    (reminder.emoji ? reminder.emoji + " " : "") + reminder.text;
   title.title = reminder.text; // full text on hover; card stays compact
+  // Click the (possibly truncated) title to read it in full + details.
+  title.addEventListener("click", (e) => {
+    e.stopPropagation();
+    openPreview(reminder);
+  });
   titleRow.appendChild(title);
   if (recurrence !== "none") {
     const recur = document.createElement("span");
@@ -437,6 +760,13 @@ function createCard(reminder, isHistory) {
     when.textContent = `${t("card-due-prefix")} ${formatDate(reminder.time)} · ${rel}`;
   }
   info.appendChild(when);
+
+  if (reminder.createdAt) {
+    const created = document.createElement("p");
+    created.className = "card-created";
+    created.textContent = `${t("card-created-prefix")} ${formatCreated(reminder.createdAt)}`;
+    info.appendChild(created);
+  }
   head.appendChild(info);
 
   const badge = document.createElement("span");
@@ -444,17 +774,12 @@ function createCard(reminder, isHistory) {
   if (isHistory) {
     badge.classList.add("completed");
     badge.textContent = t("card-badge-completed");
-  } else if (overdue) {
-    badge.classList.add("overdue");
-    badge.textContent = t("card-badge-overdue");
-    card.classList.add("priority-high");
   } else {
-    badge.classList.add("upcoming");
-    badge.textContent = t("card-badge-upcoming");
-    const hours = (reminderTime - now) / 36e5;
-    card.classList.add(
-      hours < 1 ? "priority-high" : hours < 6 ? "priority-medium" : "priority-low",
-    );
+    // Relative bucket — drives both the badge and the card's left-border color.
+    const bucket = timeBucket(reminderTime, now);
+    badge.classList.add("bucket-" + bucket);
+    badge.textContent = t("bucket-" + bucket);
+    card.classList.add("bucket-" + bucket);
   }
   head.appendChild(badge);
   card.appendChild(head);
@@ -466,6 +791,9 @@ function createCard(reminder, isHistory) {
       const chip = document.createElement("button");
       chip.className = "tag-chip";
       chip.textContent = "#" + tag;
+      const c = tagColor(tag);
+      chip.style.background = c.bg;
+      chip.style.color = c.fg;
       chip.addEventListener("click", () => {
         const sel = document.getElementById("tagFilter");
         if (sel) {
@@ -567,10 +895,51 @@ function createCard(reminder, isHistory) {
   actions.appendChild(remove);
 
   card.appendChild(actions);
+
+  // List view: a click on the row body (not a button/chip) expands it to reveal
+  // the actions. In grid view the actions are always shown, so this is inert.
+  card.addEventListener("click", (e) => {
+    if (e.target.closest("button") || e.target.closest("input")) return;
+    const expanded = card.classList.toggle("card--expanded");
+    // The list is height-capped in list view; make sure the freshly revealed
+    // actions scroll into view rather than hiding below the fold.
+    if (expanded) card.scrollIntoView({ block: "nearest" });
+  });
+
   return card;
 }
 
 // ---- list loading + filtering ----------------------------------------------
+
+// In list view, the list shows at most this many rows; the rest scroll.
+const LIST_VISIBLE_ROWS = 10;
+
+// Cap the list to ~N rows (measured from the real rows) and scroll the rest.
+// Only in list view; grid view grows naturally with the page. Plain
+// max-height + overflow on the grid — no flex sizing — so rows never overlap.
+function capListHeight(list) {
+  if (!list) return;
+  // Grid view → never cap (the page scrolls naturally).
+  if (viewMode !== "list") {
+    list.style.maxHeight = "";
+    list.style.overflow = "";
+    return;
+  }
+  // A hidden panel reports 0 heights — skip; it's re-capped when its tab shows.
+  if (!list.offsetParent) return;
+  const cards = list.querySelectorAll(".card");
+  if (cards.length <= LIST_VISIBLE_ROWS) {
+    list.style.maxHeight = "";
+    list.style.overflow = "";
+    return;
+  }
+  const rowGap = parseFloat(getComputedStyle(list).rowGap) || 0;
+  let h = 0;
+  for (let i = 0; i < LIST_VISIBLE_ROWS; i++) h += cards[i].offsetHeight;
+  h += rowGap * (LIST_VISIBLE_ROWS - 1);
+  list.style.maxHeight = Math.round(h) + "px";
+  list.style.overflow = "hidden auto"; // vertical scroll only
+}
 
 function applyViewMode() {
   [activeList, historyList].forEach((list) => {
@@ -582,6 +951,9 @@ function applyViewMode() {
   const gridBtn = document.getElementById("viewGridBtn");
   if (listBtn) listBtn.classList.toggle("active", viewMode === "list");
   if (gridBtn) gridBtn.classList.toggle("active", viewMode === "grid");
+  syncSortHeaders();
+  capListHeight(activeList);
+  capListHeight(historyList);
 }
 
 function populateTagFilter() {
@@ -606,6 +978,53 @@ function populateTagFilter() {
   tagFilterValue = sel.value;
 }
 
+// Calendar's own tag dropdown — same tag set, independent selection.
+function populateCalTagFilter() {
+  const sel = document.getElementById("calTagFilter");
+  if (!sel) return;
+  const tags = new Set();
+  allReminders.forEach((r) => (r.tags || []).forEach((tag) => tags.add(tag)));
+  allHistory.forEach((r) => (r.tags || []).forEach((tag) => tags.add(tag)));
+  const sorted = [...tags].sort((a, b) => a.localeCompare(b));
+  const prev = calTagValue;
+  sel.innerHTML = "";
+  const allOpt = document.createElement("option");
+  allOpt.value = "";
+  allOpt.textContent = t("filter-all-tags");
+  sel.appendChild(allOpt);
+  sorted.forEach((tag) => {
+    const opt = document.createElement("option");
+    opt.value = tag;
+    opt.textContent = "#" + tag;
+    sel.appendChild(opt);
+  });
+  sel.value = sorted.includes(prev) ? prev : "";
+  calTagValue = sel.value;
+}
+
+// Completed tab's own tag dropdown.
+function populateHistTagFilter() {
+  const sel = document.getElementById("histTagFilter");
+  if (!sel) return;
+  const tags = new Set();
+  allHistory.forEach((r) => (r.tags || []).forEach((tag) => tags.add(tag)));
+  const sorted = [...tags].sort((a, b) => a.localeCompare(b));
+  const prev = histTagValue;
+  sel.innerHTML = "";
+  const allOpt = document.createElement("option");
+  allOpt.value = "";
+  allOpt.textContent = t("filter-all-tags");
+  sel.appendChild(allOpt);
+  sorted.forEach((tag) => {
+    const opt = document.createElement("option");
+    opt.value = tag;
+    opt.textContent = "#" + tag;
+    sel.appendChild(opt);
+  });
+  sel.value = sorted.includes(prev) ? prev : "";
+  histTagValue = sel.value;
+}
+
 async function loadActiveFiltered() {
   if (!activeList) return;
   allReminders = await electronAPI.getReminders();
@@ -615,6 +1034,7 @@ async function loadActiveFiltered() {
 
   const filtered = allReminders.filter((r) => {
     if (favFilter && !r.favorite) return false;
+    if (recurFilter && (!r.recurrence || r.recurrence === "none")) return false;
     if (tagFilterValue && !(r.tags || []).includes(tagFilterValue)) return false;
     if (term && !(r.text || "").toLowerCase().includes(term)) return false;
     return true;
@@ -622,7 +1042,9 @@ async function loadActiveFiltered() {
 
   const sorted = filtered
     .slice()
-    .sort((a, b) => new Date(a.time) - new Date(b.time));
+    .sort((a, b) => compareReminders(a, b, activeSort));
+  renderSortHeader("activeSortHeader", activeSort, loadActiveFiltered);
+  syncSortHeaders();
   activeList.innerHTML = "";
   let overdue = 0;
   let upcoming = 0;
@@ -632,33 +1054,43 @@ async function loadActiveFiltered() {
     activeList.appendChild(createCard(reminder, false));
   });
   if (!sorted.length) {
-    const hasFilters = term || favFilter || tagFilterValue;
+    const hasFilters = term || favFilter || recurFilter || tagFilterValue;
     activeList.appendChild(
       makeEmptyState(hasFilters ? t("empty-no-results") : t("empty-active")),
     );
   }
   if (overdueCount) overdueCount.textContent = overdue.toString();
   if (upcomingCount) upcomingCount.textContent = upcoming.toString();
+  capListHeight(activeList);
 }
 
 async function loadHistoryFiltered() {
   if (!historyList) return;
   allHistory = await electronAPI.getHistory();
+  populateHistTagFilter();
   const term = historySearchValue().toLowerCase();
-  const filtered = term
-    ? allHistory.filter((r) => (r.text || "").toLowerCase().includes(term))
-    : allHistory;
+  const filtered = allHistory.filter((r) => {
+    if (histFav && !r.favorite) return false;
+    if (histRecur && (!r.recurrence || r.recurrence === "none")) return false;
+    if (histTagValue && !(r.tags || []).includes(histTagValue)) return false;
+    if (term && !(r.text || "").toLowerCase().includes(term)) return false;
+    return true;
+  });
   if (completedCount) completedCount.textContent = filtered.length.toString();
+  renderSortHeader("historySortHeader", histSort, loadHistoryFiltered);
+  syncSortHeaders();
   historyList.innerHTML = "";
   const sorted = filtered
     .slice()
-    .sort((a, b) => new Date(b.completedAt) - new Date(a.completedAt));
+    .sort((a, b) => compareReminders(a, b, histSort));
   sorted.forEach((item) => historyList.appendChild(createCard(item, true)));
   if (!sorted.length) {
+    const hasFilters = term || histFav || histRecur || histTagValue;
     historyList.appendChild(
-      makeEmptyState(term ? t("empty-no-results") : t("empty-completed")),
+      makeEmptyState(hasFilters ? t("empty-no-results") : t("empty-completed")),
     );
   }
+  capListHeight(historyList);
 }
 
 async function loadConfig() {
@@ -672,16 +1104,21 @@ async function loadConfig() {
 async function renderCalendar() {
   const container = document.getElementById("calendarContainer");
   if (!container || !window.ReminderCalendar) return;
-  const all = allReminders.concat(allHistory);
+  populateCalTagFilter();
+  const term = (document.getElementById("calSearch")?.value || "").toLowerCase();
+  const all = allReminders.concat(allHistory).filter((r) => {
+    if (calFav && !r.favorite) return false;
+    if (calRecur && (!r.recurrence || r.recurrence === "none")) return false;
+    if (calTagValue && !(r.tags || []).includes(calTagValue)) return false;
+    if (term && !(r.text || "").toLowerCase().includes(term)) return false;
+    return true;
+  });
   window.ReminderCalendar.mount(container, {
     reminders: all,
     t,
     lang: currentLang,
     onSelectDate: (date) => openModal("create", { time: date.toISOString() }),
-    onSelectReminder: (rem) => {
-      if (rem.done || rem.completedAt) openModal("duplicate", rem);
-      else openModal("edit", rem);
-    },
+    onSelectReminder: (rem) => openPreview(rem),
   });
 }
 
@@ -708,6 +1145,168 @@ function setView(targetId) {
 // ---- add / edit / duplicate modal ------------------------------------------
 
 const modal = document.getElementById("reminderModal");
+const previewModal = document.getElementById("previewModal");
+
+// ---- segmented date / time picker ------------------------------------------
+
+const DT_FIELDS = ["dtYear", "dtMonth", "dtDay", "dtHour", "dtMinute"];
+
+function dtVal(id) {
+  return (document.getElementById(id)?.value || "").trim();
+}
+
+// Read the five segments into a Date. Returns an invalid Date when anything is
+// missing or out of range so callers can surface a single "pick a date" error.
+function readModalDate() {
+  const y = parseInt(dtVal("dtYear"), 10);
+  const mo = parseInt(dtVal("dtMonth"), 10);
+  const d = parseInt(dtVal("dtDay"), 10);
+  const h = parseInt(dtVal("dtHour"), 10);
+  const mi = parseInt(dtVal("dtMinute"), 10);
+  if ([y, mo, d, h, mi].some((n) => Number.isNaN(n))) return new Date(NaN);
+  if (mo < 1 || mo > 12 || d < 1 || d > 31 || h < 0 || h > 23 || mi < 0 || mi > 59) {
+    return new Date(NaN);
+  }
+  const date = new Date(y, mo - 1, d, h, mi, 0, 0);
+  // Reject overflow (e.g. Feb 31 rolling into March).
+  if (date.getMonth() !== mo - 1 || date.getDate() !== d) return new Date(NaN);
+  return date;
+}
+
+function setModalDate(value) {
+  const d = value instanceof Date ? value : new Date(value);
+  if (isNaN(d.getTime())) return;
+  const set = (id, v) => {
+    const el = document.getElementById(id);
+    if (el) el.value = v;
+  };
+  set("dtYear", String(d.getFullYear()));
+  set("dtMonth", pad2(d.getMonth() + 1));
+  set("dtDay", pad2(d.getDate()));
+  set("dtHour", pad2(d.getHours()));
+  set("dtMinute", pad2(d.getMinutes()));
+  updateDateHint();
+}
+
+// Friendly word-format echo of the chosen day, e.g. "Saturday, 12 July 2025".
+function updateDateHint() {
+  const hint = document.getElementById("dtHint");
+  if (!hint) return;
+  const d = readModalDate();
+  if (isNaN(d.getTime())) {
+    hint.textContent = t("dt-hint-invalid");
+    hint.classList.add("dt-hint--warn");
+    return;
+  }
+  hint.classList.remove("dt-hint--warn");
+  hint.textContent = `${weekdayName(d.getDay())}, ${d.getDate()} ${monthName(
+    d.getMonth(),
+  )} ${d.getFullYear()} · ${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+}
+
+function closeDtMenus() {
+  document
+    .querySelectorAll(".dt-menu.open")
+    .forEach((m) => m.classList.remove("open"));
+}
+
+function fillDtMenu(menuId, targetId, items) {
+  const menu = document.getElementById(menuId);
+  if (!menu) return;
+  menu.innerHTML = "";
+  items.forEach(({ label, value }) => {
+    const opt = document.createElement("button");
+    opt.type = "button";
+    opt.className = "dt-opt";
+    opt.textContent = label;
+    opt.addEventListener("click", () => {
+      const input = document.getElementById(targetId);
+      if (input) input.value = value;
+      closeDtMenus();
+      updateDateHint();
+    });
+    menu.appendChild(opt);
+  });
+}
+
+// Builds the dropdown contents. Re-run on language change so month names track.
+function buildDtMenus() {
+  const thisYear = new Date().getFullYear();
+  fillDtMenu(
+    "dtYearMenu",
+    "dtYear",
+    Array.from({ length: 8 }, (_, i) => {
+      const y = thisYear - 1 + i;
+      return { label: String(y), value: String(y) };
+    }),
+  );
+  fillDtMenu(
+    "dtMonthMenu",
+    "dtMonth",
+    Array.from({ length: 12 }, (_, i) => ({
+      label: monthName(i),
+      value: pad2(i + 1),
+    })),
+  );
+  fillDtMenu(
+    "dtDayMenu",
+    "dtDay",
+    Array.from({ length: 31 }, (_, i) => ({
+      label: pad2(i + 1),
+      value: pad2(i + 1),
+    })),
+  );
+  fillDtMenu(
+    "dtHourMenu",
+    "dtHour",
+    Array.from({ length: 24 }, (_, i) => ({ label: pad2(i), value: pad2(i) })),
+  );
+  // Minutes in 5-minute steps; the quarter-hours people actually use are here.
+  fillDtMenu(
+    "dtMinuteMenu",
+    "dtMinute",
+    Array.from({ length: 12 }, (_, i) => ({
+      label: pad2(i * 5),
+      value: pad2(i * 5),
+    })),
+  );
+}
+
+// Big presets: pick the day, keep whatever time-of-day is already chosen.
+function applyQuickDay(kind) {
+  const cur = readModalDate();
+  const h = isNaN(cur.getTime()) ? 9 : cur.getHours();
+  const m = isNaN(cur.getTime()) ? 0 : cur.getMinutes();
+  const d = new Date();
+  d.setSeconds(0, 0);
+  if (kind === "tomorrow") {
+    d.setDate(d.getDate() + 1);
+  } else if (kind === "weekend") {
+    let add = (6 - d.getDay() + 7) % 7;
+    if (add === 0) add = 7;
+    d.setDate(d.getDate() + add);
+  } else if (kind === "nextweek") {
+    let add = (1 - d.getDay() + 7) % 7;
+    if (add === 0) add = 7;
+    d.setDate(d.getDate() + add);
+  }
+  d.setHours(h, m, 0, 0);
+  // "Later today" with a time already in the past → bump to the next hour.
+  if (kind === "today" && d <= new Date()) {
+    const next = new Date();
+    next.setHours(next.getHours() + 1, 0, 0, 0);
+    d.setHours(next.getHours(), 0, 0, 0);
+  }
+  setModalDate(d);
+}
+
+// Small presets: set just the time-of-day, keep the chosen day.
+function applyQuickTime(h, m) {
+  const cur = readModalDate();
+  const d = isNaN(cur.getTime()) ? new Date() : cur;
+  d.setHours(h, m, 0, 0);
+  setModalDate(d);
+}
 
 function buildQuickOptions() {
   const wrap = document.getElementById("quickOptions");
@@ -721,24 +1320,11 @@ function buildQuickOptions() {
   ].forEach(([kind, key]) => {
     const btn = document.createElement("button");
     btn.type = "button";
-    btn.className = "quick-btn";
+    btn.className = "quick-day";
     btn.textContent = t(key);
-    btn.addEventListener("click", () => {
-      const input = document.getElementById("modalTime");
-      if (input) input.value = toDatetimeLocal(quickDate(kind));
-    });
+    btn.addEventListener("click", () => applyQuickDay(kind));
     wrap.appendChild(btn);
   });
-}
-
-// Set just the time-of-day on the modal's chosen date (keeps the date).
-function setModalTimeOfDay(h, m) {
-  const input = document.getElementById("modalTime");
-  if (!input) return;
-  let d = input.value ? new Date(input.value) : new Date();
-  if (isNaN(d.getTime())) d = new Date();
-  d.setHours(h, m, 0, 0);
-  input.value = toDatetimeLocal(d);
 }
 
 function buildTimeOptions() {
@@ -746,23 +1332,26 @@ function buildTimeOptions() {
   if (!wrap) return;
   wrap.innerHTML = "";
   [
-    ["quick-morning", 11, 0],
-    ["quick-midday", 12, 0],
-    ["quick-afternoon", 17, 0],
-    ["quick-evening", 21, 0],
-  ].forEach(([key, h, m]) => {
+    ["quick-morning", 11, 0, "morning"],
+    ["quick-midday", 12, 0, "midday"],
+    ["quick-afternoon", 17, 0, "afternoon"],
+    ["quick-evening", 21, 0, "evening"],
+  ].forEach(([key, h, m, tone]) => {
     const btn = document.createElement("button");
     btn.type = "button";
-    btn.className = "quick-btn";
+    btn.className = "quick-time qt-" + tone;
     btn.textContent = t(key);
-    btn.addEventListener("click", () => setModalTimeOfDay(h, m));
+    btn.addEventListener("click", () => applyQuickTime(h, m));
     wrap.appendChild(btn);
   });
 }
 
-// All tags currently in use across active + history, plus any selected now.
+// ---- tags ------------------------------------------------------------------
+
+// Defaults + custom (localStorage) + any tag in use + currently selected.
 function collectKnownTags() {
-  const set = new Set();
+  const set = new Set(DEFAULT_TAGS);
+  getCustomTags().forEach((tag) => set.add(tag));
   allReminders.forEach((r) => (r.tags || []).forEach((tag) => set.add(tag)));
   allHistory.forEach((r) => (r.tags || []).forEach((tag) => set.add(tag)));
   modalSelectedTags.forEach((tag) => set.add(tag));
@@ -776,67 +1365,189 @@ function updateFavButton() {
   btn.classList.toggle("active", modalFavorite);
 }
 
+// ---- emoji chooser ---------------------------------------------------------
+
+// A small curated set covering everyday reminders; no full picker needed.
+const EMOJI_CHOICES = [
+  "🙂",
+  "📌", "✅", "📝", "⭐", "🔔", "⏰", "🔥", "❗",
+  "💼", "🏠", "🛒", "💰", "📞", "📧", "💬", "📅",
+  "🎉", "🎂", "🎁", "❤️", "💊", "🏥", "🏋️", "🧘",
+  "🍽️", "☕", "🚗", "✈️", "📚", "💡", "🐶", "🌟",
+];
+
+function updateEmojiButton() {
+  const btn = document.getElementById("modalEmojiBtn");
+  if (!btn) return;
+  btn.textContent = modalEmoji || "🙂";
+  btn.classList.toggle("emoji-btn--empty", !modalEmoji);
+}
+
+function buildEmojiPicker() {
+  const pop = document.getElementById("emojiPop");
+  if (!pop) return;
+  pop.innerHTML = "";
+
+  const none = document.createElement("button");
+  none.type = "button";
+  none.className = "emoji-none";
+  none.textContent = "✕ " + t("emoji-none");
+  none.addEventListener("click", () => {
+    modalEmoji = "";
+    updateEmojiButton();
+    closeEmojiPicker();
+  });
+  pop.appendChild(none);
+
+  const grid = document.createElement("div");
+  grid.className = "emoji-grid";
+  EMOJI_CHOICES.forEach((emoji) => {
+    const cell = document.createElement("button");
+    cell.type = "button";
+    cell.className = "emoji-cell";
+    cell.textContent = emoji;
+    cell.addEventListener("click", () => {
+      modalEmoji = emoji;
+      updateEmojiButton();
+      closeEmojiPicker();
+    });
+    grid.appendChild(cell);
+  });
+  pop.appendChild(grid);
+}
+
+function openEmojiPicker() {
+  const pop = document.getElementById("emojiPop");
+  if (!pop) return;
+  buildEmojiPicker();
+  pop.classList.remove("hidden");
+}
+function closeEmojiPicker() {
+  document.getElementById("emojiPop")?.classList.add("hidden");
+}
+function toggleEmojiPicker() {
+  const pop = document.getElementById("emojiPop");
+  if (!pop) return;
+  if (pop.classList.contains("hidden")) openEmojiPicker();
+  else closeEmojiPicker();
+}
+
+// Apply a tag's color to a toggle chip for both selected/unselected states.
+function styleTagToggle(chip, tag, selected) {
+  const c = tagColor(tag);
+  chip.classList.toggle("selected", selected);
+  if (selected) {
+    // Selected: vivid filled pill so it clearly stands out.
+    chip.style.background = c.dot;
+    chip.style.borderColor = c.dot;
+    chip.style.color = "#ffffff";
+  } else {
+    // Unselected: muted — neutral chip with just colored text + a faint
+    // colored outline, so the palette isn't shouting before you pick.
+    chip.style.background = "#f8fafc";
+    chip.style.borderColor = c.bg;
+    chip.style.color = c.fg;
+  }
+}
+
 function renderModalTagChips() {
   const wrap = document.getElementById("modalTagChips");
   if (!wrap) return;
   wrap.innerHTML = "";
-  const known = collectKnownTags();
-  if (!known.length) {
-    wrap.appendChild(
-      Object.assign(document.createElement("span"), {
-        className: "tag-toggle tag-toggle--empty",
-        textContent: t("tags-none"),
-      }),
-    );
-    return;
-  }
-  known.forEach((tag) => {
+  collectKnownTags().forEach((tag) => {
     const chip = document.createElement("button");
     chip.type = "button";
-    chip.className =
-      "tag-toggle" + (modalSelectedTags.has(tag) ? " selected" : "");
+    chip.className = "tag-toggle";
     chip.textContent = "#" + tag;
-    if (modalManageTags) {
-      const del = document.createElement("span");
-      del.className = "tag-del";
-      del.textContent = "×";
-      chip.appendChild(del);
-      chip.addEventListener("click", async () => {
-        await electronAPI.deleteTag(tag);
-        modalSelectedTags.delete(tag);
-        allReminders = await electronAPI.getReminders();
-        allHistory = await electronAPI.getHistory();
-        renderModalTagChips();
-        loadActiveFiltered();
-      });
-    } else {
-      chip.addEventListener("click", () => {
-        if (modalSelectedTags.has(tag)) modalSelectedTags.delete(tag);
-        else modalSelectedTags.add(tag);
-        renderModalTagChips();
-      });
-    }
+    styleTagToggle(chip, tag, modalSelectedTags.has(tag));
+    chip.addEventListener("click", () => {
+      if (modalSelectedTags.has(tag)) modalSelectedTags.delete(tag);
+      else modalSelectedTags.add(tag);
+      renderModalTagChips();
+    });
     wrap.appendChild(chip);
   });
 }
 
-function addNewTagFromInput() {
-  const input = document.getElementById("modalNewTag");
+// ---- tag manager popup -----------------------------------------------------
+
+const tagModal = document.getElementById("tagManagerModal");
+
+function openTagManager() {
+  if (!tagModal) return;
+  renderTagManagerList();
+  const input = document.getElementById("tagMgrInput");
+  if (input) input.value = "";
+  tagModal.classList.remove("hidden");
+  if (input) input.focus();
+}
+
+function closeTagManager() {
+  if (tagModal) tagModal.classList.add("hidden");
+  renderModalTagChips();
+}
+
+function renderTagManagerList() {
+  const list = document.getElementById("tagMgrList");
+  if (!list) return;
+  list.innerHTML = "";
+  collectKnownTags().forEach((tag) => {
+    const row = document.createElement("div");
+    row.className = "tag-mgr-row";
+
+    const chip = document.createElement("button");
+    chip.type = "button";
+    chip.className = "tag-toggle";
+    chip.textContent = "#" + tag;
+    styleTagToggle(chip, tag, modalSelectedTags.has(tag));
+    chip.addEventListener("click", () => {
+      if (modalSelectedTags.has(tag)) modalSelectedTags.delete(tag);
+      else modalSelectedTags.add(tag);
+      renderTagManagerList();
+    });
+    row.appendChild(chip);
+
+    const del = document.createElement("button");
+    del.type = "button";
+    del.className = "tag-mgr-del";
+    del.textContent = "🗑";
+    if (DEFAULT_TAGS.includes(tag)) {
+      del.disabled = true;
+      del.title = t("tag-default-note");
+    } else {
+      del.title = t("card-btn-delete");
+      del.addEventListener("click", async () => {
+        await electronAPI.deleteTag(tag);
+        removeCustomTag(tag);
+        modalSelectedTags.delete(tag);
+        allReminders = await electronAPI.getReminders();
+        allHistory = await electronAPI.getHistory();
+        renderTagManagerList();
+        loadActiveFiltered();
+      });
+    }
+    row.appendChild(del);
+    list.appendChild(row);
+  });
+}
+
+function addTagFromManager() {
+  const input = document.getElementById("tagMgrInput");
   if (!input) return;
   const value = input.value.trim();
   if (!value) return;
+  addCustomTag(value);
   modalSelectedTags.add(value);
   input.value = "";
-  renderModalTagChips();
+  renderTagManagerList();
+  input.focus();
 }
 
 function openModal(mode, reminder) {
   if (!modal) return;
   modalMode = mode;
   modalEditId = mode === "edit" ? reminder.id : null;
-  modalManageTags = false;
-  const manageBtn = document.getElementById("modalManageTags");
-  if (manageBtn) manageBtn.dataset.active = "false";
+  modalFromAlert = false; // default; the alert path sets it true after opening
 
   const titleEl = document.getElementById("modalTitle");
   if (titleEl) {
@@ -849,62 +1560,64 @@ function openModal(mode, reminder) {
   }
 
   const textEl = document.getElementById("modalText");
-  const timeEl = document.getElementById("modalTime");
   const recEl = document.getElementById("modalRecurrence");
   const errEl = document.getElementById("modalError");
   if (errEl) errEl.textContent = "";
 
   const r = reminder || {};
   if (textEl) textEl.value = mode === "create" && !r.text ? "" : r.text || "";
-  if (timeEl) {
-    // Edit keeps the reminder's time; create/duplicate use the provided time or a sensible default.
-    const base =
-      mode === "edit" || (mode === "create" && r.time)
-        ? r.time
-        : mode === "duplicate"
-          ? quickDate("tomorrow")
-          : r.time || defaultModalTime();
-    timeEl.value = toDatetimeLocal(base);
-  }
+  // Edit keeps the reminder's time; create/duplicate use the provided time or a sensible default.
+  const base =
+    mode === "edit" || (mode === "create" && r.time)
+      ? r.time
+      : mode === "duplicate"
+        ? quickDate("tomorrow")
+        : r.time || defaultModalTime();
+  setModalDate(base);
   if (recEl) recEl.value = r.recurrence || "none";
 
   modalSelectedTags = new Set(r.tags || []);
   modalFavorite = !!r.favorite;
+  modalEmoji = r.emoji || "";
   updateFavButton();
+  updateEmojiButton();
+  closeEmojiPicker();
   renderModalTagChips();
-  const newTagInput = document.getElementById("modalNewTag");
-  if (newTagInput) newTagInput.value = "";
 
   modal.classList.remove("hidden");
   if (textEl) textEl.focus();
 }
 
 function closeModal() {
+  closeDtMenus();
   if (modal) modal.classList.add("hidden");
   modalEditId = null;
+  // If this edit came from the alert's "Custom…" button, let the main process
+  // resume showing alerts (it was suppressed while editing).
+  if (modalFromAlert) {
+    modalFromAlert = false;
+    electronAPI.alertEditDone?.();
+  }
 }
 
 async function saveModal() {
   const errEl = document.getElementById("modalError");
   const text = (document.getElementById("modalText")?.value || "").trim();
-  const timeVal = document.getElementById("modalTime")?.value || "";
+  const when = readModalDate();
   const recurrence = document.getElementById("modalRecurrence")?.value || "none";
-  // Include anything typed in the new-tag box but not yet committed.
-  const pending = (document.getElementById("modalNewTag")?.value || "").trim();
-  if (pending) modalSelectedTags.add(pending);
   const tags = [...modalSelectedTags];
   const favorite = modalFavorite;
+  const emoji = modalEmoji;
 
   const showError = (msg) => {
     if (errEl) errEl.textContent = msg;
   };
 
   if (!text) return showError(t("alert-empty-text"));
-  const when = new Date(timeVal);
-  if (!timeVal || isNaN(when.getTime())) return showError(t("alert-invalid-date"));
+  if (isNaN(when.getTime())) return showError(t("alert-invalid-date"));
   if (when <= new Date()) return showError(t("alert-past-time"));
 
-  const payload = { text, time: when.toISOString(), tags, favorite, recurrence };
+  const payload = { text, time: when.toISOString(), emoji, tags, favorite, recurrence };
   try {
     if (modalMode === "edit" && modalEditId) {
       await electronAPI.updateReminder(modalEditId, payload);
@@ -932,10 +1645,9 @@ function setOptionText(selectId, valueToKey) {
 
 function updateAllTranslations() {
   const set = (sel, value) => {
-    const el =
-      typeof sel === "string" && sel.startsWith("#")
-        ? document.getElementById(sel.slice(1))
-        : document.querySelector(sel);
+    // querySelector handles both plain ids ("#foo") and compound selectors
+    // ("#activePanel .panel-header h2"); getElementById would choke on the latter.
+    const el = document.querySelector(sel);
     if (el) el.textContent = value;
   };
 
@@ -971,6 +1683,37 @@ function updateAllTranslations() {
 
   const favBtn = document.getElementById("favFilterBtn");
   if (favBtn) favBtn.textContent = t("filter-favorites");
+  const recurBtn = document.getElementById("recurFilterBtn");
+  if (recurBtn) recurBtn.textContent = t("filter-repeating");
+
+  // Calendar toolbar mirrors the list's filter labels.
+  const calSearch = document.getElementById("calSearch");
+  if (calSearch) calSearch.placeholder = t("search-active");
+  const calFavBtn = document.getElementById("calFavBtn");
+  if (calFavBtn) calFavBtn.textContent = t("filter-favorites");
+  const calRecurBtn = document.getElementById("calRecurBtn");
+  if (calRecurBtn) calRecurBtn.textContent = t("filter-repeating");
+
+  // Completed-tab filter labels
+  const histFavBtn = document.getElementById("histFavBtn");
+  if (histFavBtn) histFavBtn.textContent = t("filter-favorites");
+  const histRecurBtn = document.getElementById("histRecurBtn");
+  if (histRecurBtn) histRecurBtn.textContent = t("filter-repeating");
+
+  // Sortable column headers (re-render so their labels follow the language)
+  renderSortHeader("activeSortHeader", activeSort, loadActiveFiltered);
+  renderSortHeader("historySortHeader", histSort, loadHistoryFiltered);
+  syncSortHeaders();
+
+  // Preview popup
+  set("#previewHeading", t("preview-title"));
+  const previewCloseBtn = document.getElementById("previewCloseBtn");
+  if (previewCloseBtn) previewCloseBtn.textContent = t("preview-close");
+  const previewCloseX = document.getElementById("previewClose");
+  if (previewCloseX) previewCloseX.title = t("modal-close");
+  const previewEditBtn = document.getElementById("previewEdit");
+  if (previewEditBtn) previewEditBtn.textContent = t("card-btn-edit");
+
   const viewListBtn = document.getElementById("viewListBtn");
   const viewGridBtn = document.getElementById("viewGridBtn");
   if (viewListBtn) viewListBtn.textContent = t("view-list");
@@ -1020,12 +1763,8 @@ function updateAllTranslations() {
   set("#modalTagsLabel", t("modal-tags-label"));
   const modalText = document.getElementById("modalText");
   if (modalText) modalText.placeholder = t("modal-text-ph");
-  const modalNewTag = document.getElementById("modalNewTag");
-  if (modalNewTag) modalNewTag.placeholder = t("modal-newtag-ph");
-  const modalAddTag = document.getElementById("modalAddTag");
-  if (modalAddTag) modalAddTag.textContent = t("modal-addtag");
   const modalManage = document.getElementById("modalManageTags");
-  if (modalManage) modalManage.title = t("modal-managetags");
+  if (modalManage) modalManage.textContent = t("modal-managetags");
   const modalFavBtn = document.getElementById("modalFavBtn");
   if (modalFavBtn) modalFavBtn.title = t("modal-favorite-label");
   const modalClose = document.getElementById("modalClose");
@@ -1035,8 +1774,38 @@ function updateAllTranslations() {
   if (modalCancel) modalCancel.textContent = t("modal-cancel");
   if (modalSave) modalSave.textContent = t("modal-save");
 
+  // Date / time picker chrome
+  set("#dtYearCap", t("dt-year"));
+  set("#dtMonthCap", t("dt-month"));
+  set("#dtDayCap", t("dt-day"));
+  set("#dtHourCap", t("dt-hour"));
+  set("#dtMinuteCap", t("dt-minute"));
+  set("#dtCalendarBtnText", t("dt-calendar"));
+  set("#dtNowBtnText", t("dt-now"));
+  set("#quickDayCap", t("quick-day-cap"));
+  set("#quickTimeCap", t("quick-time-cap"));
+  const dtCalBtn = document.getElementById("dtCalendarBtn");
+  if (dtCalBtn) dtCalBtn.title = t("dt-calendar-title");
+  const dtNowBtn = document.getElementById("dtNowBtn");
+  if (dtNowBtn) dtNowBtn.title = t("dt-now-title");
+  const emojiBtn = document.getElementById("modalEmojiBtn");
+  if (emojiBtn) emojiBtn.title = t("emoji-choose");
+
+  // Tag manager popup
+  set("#tagMgrTitle", t("tag-mgr-title"));
+  const tagMgrInput = document.getElementById("tagMgrInput");
+  if (tagMgrInput) tagMgrInput.placeholder = t("modal-newtag-ph");
+  const tagMgrAdd = document.getElementById("tagMgrAdd");
+  if (tagMgrAdd) tagMgrAdd.textContent = t("modal-addtag");
+  const tagMgrDone = document.getElementById("tagMgrDone");
+  if (tagMgrDone) tagMgrDone.textContent = t("tag-mgr-done");
+  const tagMgrClose = document.getElementById("tagMgrClose");
+  if (tagMgrClose) tagMgrClose.title = t("modal-close");
+
+  buildDtMenus();
   buildQuickOptions();
   buildTimeOptions();
+  updateDateHint();
 }
 
 // ---- event wiring ----------------------------------------------------------
@@ -1046,6 +1815,13 @@ if (electronAPI.onRefreshReminders) {
 }
 if (electronAPI.onOpenAddModal) {
   electronAPI.onOpenAddModal(() => openModal("create"));
+}
+if (electronAPI.onOpenEditModal) {
+  electronAPI.onOpenEditModal((reminder) => {
+    if (!reminder) return;
+    openModal("edit", reminder);
+    modalFromAlert = true; // set after openModal (which resets it)
+  });
 }
 
 document.getElementById("activeSearch")?.addEventListener("input", () => loadActiveFiltered());
@@ -1058,6 +1834,44 @@ document.getElementById("favFilterBtn")?.addEventListener("click", (e) => {
   favFilter = !favFilter;
   e.currentTarget.dataset.active = favFilter ? "true" : "false";
   loadActiveFiltered();
+});
+document.getElementById("recurFilterBtn")?.addEventListener("click", (e) => {
+  recurFilter = !recurFilter;
+  e.currentTarget.dataset.active = recurFilter ? "true" : "false";
+  loadActiveFiltered();
+});
+
+// Calendar filters (independent of the list's)
+document.getElementById("calSearch")?.addEventListener("input", () => renderCalendar());
+document.getElementById("calTagFilter")?.addEventListener("change", (e) => {
+  calTagValue = e.target.value;
+  renderCalendar();
+});
+document.getElementById("calFavBtn")?.addEventListener("click", (e) => {
+  calFav = !calFav;
+  e.currentTarget.dataset.active = calFav ? "true" : "false";
+  renderCalendar();
+});
+document.getElementById("calRecurBtn")?.addEventListener("click", (e) => {
+  calRecur = !calRecur;
+  e.currentTarget.dataset.active = calRecur ? "true" : "false";
+  renderCalendar();
+});
+
+// Completed-tab filters
+document.getElementById("histTagFilter")?.addEventListener("change", (e) => {
+  histTagValue = e.target.value;
+  loadHistoryFiltered();
+});
+document.getElementById("histFavBtn")?.addEventListener("click", (e) => {
+  histFav = !histFav;
+  e.currentTarget.dataset.active = histFav ? "true" : "false";
+  loadHistoryFiltered();
+});
+document.getElementById("histRecurBtn")?.addEventListener("click", (e) => {
+  histRecur = !histRecur;
+  e.currentTarget.dataset.active = histRecur ? "true" : "false";
+  loadHistoryFiltered();
 });
 document.getElementById("viewListBtn")?.addEventListener("click", () => {
   viewMode = "list";
@@ -1135,23 +1949,108 @@ document.getElementById("modalFavBtn")?.addEventListener("click", () => {
   modalFavorite = !modalFavorite;
   updateFavButton();
 });
-document.getElementById("modalAddTag")?.addEventListener("click", addNewTagFromInput);
-document.getElementById("modalNewTag")?.addEventListener("keydown", (e) => {
-  if (e.key === "Enter") {
-    e.preventDefault();
-    addNewTagFromInput();
-  }
-});
-document.getElementById("modalManageTags")?.addEventListener("click", (e) => {
-  modalManageTags = !modalManageTags;
-  e.currentTarget.dataset.active = modalManageTags ? "true" : "false";
-  renderModalTagChips();
-});
+document.getElementById("modalManageTags")?.addEventListener("click", openTagManager);
 modal?.addEventListener("click", (e) => {
   if (e.target === modal) closeModal();
 });
+
+// Reminder preview popup wiring
+document.getElementById("previewClose")?.addEventListener("click", closePreview);
+document.getElementById("previewCloseBtn")?.addEventListener("click", closePreview);
+document.getElementById("previewEdit")?.addEventListener("click", () => {
+  const r = previewReminder;
+  closePreview();
+  if (!r) return;
+  if (r.done || r.completedAt) openModal("duplicate", r);
+  else openModal("edit", r);
+});
+previewModal?.addEventListener("click", (e) => {
+  if (e.target === previewModal) closePreview();
+});
+
+// Tag manager popup wiring
+document.getElementById("tagMgrAdd")?.addEventListener("click", addTagFromManager);
+document.getElementById("tagMgrInput")?.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") {
+    e.preventDefault();
+    addTagFromManager();
+  }
+});
+document.getElementById("tagMgrDone")?.addEventListener("click", closeTagManager);
+document.getElementById("tagMgrClose")?.addEventListener("click", closeTagManager);
+tagModal?.addEventListener("click", (e) => {
+  if (e.target === tagModal) closeTagManager();
+});
+
+// Emoji chooser
+document.getElementById("modalEmojiBtn")?.addEventListener("click", (e) => {
+  e.stopPropagation();
+  toggleEmojiPicker();
+});
+document.addEventListener("click", (e) => {
+  if (!e.target.closest(".text-row")) closeEmojiPicker();
+});
+
+// "Now": sync the picker to the current time.
+document.getElementById("dtNowBtn")?.addEventListener("click", () => {
+  setModalDate(new Date());
+});
+
+// Date / time picker: caret menus, typing, and the calendar fallback.
+document.querySelectorAll(".dt-caret").forEach((btn) => {
+  btn.addEventListener("click", (e) => {
+    e.preventDefault();
+    const menu = btn.closest(".dt-field")?.querySelector(".dt-menu");
+    const wasOpen = menu?.classList.contains("open");
+    closeDtMenus();
+    if (menu && !wasOpen) menu.classList.add("open");
+  });
+});
+DT_FIELDS.forEach((id) => {
+  document.getElementById(id)?.addEventListener("input", updateDateHint);
+});
+document.addEventListener("click", (e) => {
+  if (!e.target.closest(".dt-field")) closeDtMenus();
+});
+const dtCalInput = document.getElementById("dtCalendarInput");
+document.getElementById("dtCalendarBtn")?.addEventListener("click", () => {
+  if (!dtCalInput) return;
+  const cur = readModalDate();
+  if (!isNaN(cur.getTime())) {
+    dtCalInput.value = `${cur.getFullYear()}-${pad2(cur.getMonth() + 1)}-${pad2(cur.getDate())}`;
+  }
+  try {
+    if (typeof dtCalInput.showPicker === "function") dtCalInput.showPicker();
+    else dtCalInput.click();
+  } catch {
+    dtCalInput.click();
+  }
+});
+dtCalInput?.addEventListener("change", () => {
+  if (!dtCalInput.value) return;
+  const [y, mo, d] = dtCalInput.value.split("-").map((n) => parseInt(n, 10));
+  const cur = readModalDate();
+  const h = isNaN(cur.getTime()) ? 9 : cur.getHours();
+  const mi = isNaN(cur.getTime()) ? 0 : cur.getMinutes();
+  setModalDate(new Date(y, mo - 1, d, h, mi, 0, 0));
+});
+
 document.addEventListener("keydown", (e) => {
-  if (e.key === "Escape" && modal && !modal.classList.contains("hidden")) closeModal();
+  if (e.key !== "Escape") return;
+  const emojiOpen = !document
+    .getElementById("emojiPop")
+    ?.classList.contains("hidden");
+  if (tagModal && !tagModal.classList.contains("hidden")) {
+    closeTagManager();
+  } else if (emojiOpen) {
+    closeEmojiPicker();
+  } else if (document.querySelector(".dt-menu.open")) {
+    closeDtMenus();
+  } else if (previewModal && !previewModal.classList.contains("hidden")) {
+    closePreview();
+  } else if (modal && !modal.classList.contains("hidden")) {
+    closeModal();
+  }
 });
 
 // Settings folder controls

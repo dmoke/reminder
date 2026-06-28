@@ -37,6 +37,11 @@ const ALERT_STRINGS = {
     "snooze-1h": "1 hour",
     "snooze-3h": "3 hours",
     "snooze-tomorrow": "Tomorrow",
+    "snooze-2d": "2 days",
+    "snooze-1w": "1 week",
+    "snooze-1mo": "1 month",
+    "snooze-1y": "1 year",
+    "snooze-custom": "Custom…",
     "snooze-all": "Snooze all",
     "complete-all": "Complete all",
     recurring: "Repeats",
@@ -53,6 +58,11 @@ const ALERT_STRINGS = {
     "snooze-1h": "1 год",
     "snooze-3h": "3 год",
     "snooze-tomorrow": "Завтра",
+    "snooze-2d": "2 дні",
+    "snooze-1w": "1 тиждень",
+    "snooze-1mo": "1 місяць",
+    "snooze-1y": "1 рік",
+    "snooze-custom": "Свій час…",
     "snooze-all": "Відкласти всі",
     "complete-all": "Виконати всі",
     recurring: "Повторюється",
@@ -83,6 +93,10 @@ let isQuitting = false;
 let currentDue = [];
 let lastDueKey = "";
 let lastRaise = 0;
+// While the user is rescheduling a reminder via the in-app edit modal (opened
+// from the alert's "Custom…" button), don't pop the always-on-top alert over it
+// — not even for other reminders that come due meanwhile.
+let suppressAlert = false;
 
 function notifyRefresh() {
   if (mainWindow && !mainWindow.isDestroyed()) {
@@ -127,10 +141,10 @@ function openMainWindow() {
     return;
   }
   mainWindow = new BrowserWindow({
-    width: 1000,
-    height: 860,
-    minWidth: 900,
-    minHeight: 780,
+    width: 1140,
+    height: 920,
+    minWidth: 1020,
+    minHeight: 620,
     icon: appIcon,
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
@@ -153,7 +167,13 @@ function openMainWindow() {
       mainWindow.hide();
     }
   });
-  mainWindow.on("closed", () => (mainWindow = null));
+  // If the window goes away while an alert-initiated edit was in progress,
+  // resume alerts so they can never get stuck suppressed.
+  mainWindow.on("hide", () => (suppressAlert = false));
+  mainWindow.on("closed", () => {
+    suppressAlert = false;
+    mainWindow = null;
+  });
 }
 
 // Open the in-window add/edit modal, creating/showing the main window first.
@@ -163,6 +183,23 @@ function openAddModal() {
   const send = () => {
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send("open-add-modal");
+    }
+  };
+  if (fresh) {
+    mainWindow.webContents.once("did-finish-load", send);
+  } else {
+    send();
+  }
+}
+
+// Open the in-window EDIT modal for a specific reminder (from the alert's
+// "Custom…" reschedule button).
+function openEditModalFor(reminder) {
+  const fresh = !mainWindow;
+  openMainWindow();
+  const send = () => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send("open-edit-modal", reminder);
     }
   };
   if (fresh) {
@@ -219,6 +256,7 @@ function alertPayload(due, isNew) {
     reminders: due.map((r) => ({
       id: r.id,
       text: r.text,
+      emoji: r.emoji || "",
       time: r.time,
       tags: r.tags || [],
       favorite: !!r.favorite,
@@ -259,6 +297,9 @@ function handleDue(due) {
     closeAlertWindow();
     return;
   }
+  // Editing a reminder from the alert: keep tracking due reminders but don't
+  // raise the alert window over the edit modal.
+  if (suppressAlert) return;
   ensureAlertWindow();
   // If the window is still loading, the did-finish-load handler performs the
   // first send + raise once content has painted.
@@ -326,6 +367,14 @@ function sanitizeRecurrence(value) {
   return RECURRENCES.includes(value) ? value : "none";
 }
 
+// Optional decorative emoji. Kept short so a stray paste can't bloat the file;
+// empty string means "no emoji" (the default).
+function sanitizeEmoji(value) {
+  if (typeof value !== "string") return "";
+  const v = value.trim();
+  return v.length <= 16 ? v : "";
+}
+
 function sanitizeNewReminder(input) {
   if (!input || typeof input !== "object") return null;
   const text = typeof input.text === "string" ? input.text.trim() : "";
@@ -336,6 +385,7 @@ function sanitizeNewReminder(input) {
     text,
     time: time.toISOString(),
     done: false,
+    emoji: sanitizeEmoji(input.emoji),
     tags: sanitizeTags(input.tags),
     favorite: !!input.favorite,
     recurrence: sanitizeRecurrence(input.recurrence),
@@ -354,6 +404,7 @@ function sanitizeUpdates(updates) {
     if (isNaN(time.getTime())) return null;
     clean.time = time.toISOString();
   }
+  if (updates.emoji !== undefined) clean.emoji = sanitizeEmoji(updates.emoji);
   if (updates.tags !== undefined) clean.tags = sanitizeTags(updates.tags);
   if (updates.favorite !== undefined) clean.favorite = !!updates.favorite;
   if (updates.recurrence !== undefined) {
@@ -460,6 +511,22 @@ ipcMain.handle("alert:dismiss", () => {
   return true;
 });
 ipcMain.handle("alert:open-app", () => openMainWindow());
+// "Custom…" reschedule: open the edit modal for this reminder and suppress the
+// alert (so it can't float over the modal) until editing finishes.
+ipcMain.handle("alert:edit", (event, id) => {
+  const reminder = storage.getActive().find((r) => r.id === id);
+  if (!reminder) return false;
+  suppressAlert = true;
+  closeAlertWindow();
+  openEditModalFor(reminder);
+  return true;
+});
+ipcMain.handle("alert:edit-done", () => {
+  suppressAlert = false;
+  // Force a fresh raise on the next scheduler tick if anything is still due.
+  lastDueKey = "";
+  return true;
+});
 
 app.whenReady().then(async () => {
   console.log("main: app ready");

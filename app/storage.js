@@ -37,6 +37,9 @@ class Storage {
   }
 
   writeFile(filePath, data) {
+    // The configured data folder may be missing (deleted, moved, or on an
+    // unmounted drive). Recreate it rather than crashing on launch.
+    fs.mkdirSync(path.dirname(filePath), { recursive: true });
     const tempPath = filePath + ".tmp";
     fs.writeFileSync(tempPath, JSON.stringify(data, null, 2));
     fs.renameSync(tempPath, filePath);

@@ -218,7 +218,9 @@
 .cal-pill-time {
   flex: 0 0 auto;
   font-variant-numeric: tabular-nums;
-  opacity: 0.85;
+  font-size: 0.68rem;
+  font-weight: 500;
+  opacity: 0.65;
 }
 
 .cal-pill-text {
@@ -273,6 +275,100 @@
 .cal-more:hover {
   color: #111827;
   background: rgba(148, 163, 184, 0.14);
+}
+
+/* ---- Day popup ("+N more" -> full day list) ---- */
+.cal-daypop {
+  position: fixed;
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 200px;
+  max-width: 300px;
+  max-height: 320px;
+  padding: 12px;
+  background: #ffffff;
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  border-radius: 16px;
+  box-shadow: 0 18px 40px rgba(15, 23, 42, 0.18);
+}
+
+.cal-daypop-head {
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: #111827;
+  text-transform: capitalize;
+  padding-bottom: 4px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.16);
+}
+
+.cal-daypop-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.cal-daypop-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+  padding: 6px 8px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-align: left;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  cursor: pointer;
+  color: #111827;
+  transition: background 0.12s ease;
+}
+
+.cal-daypop-row:hover {
+  background: #f1f5f9;
+}
+
+.cal-daypop-time {
+  flex: 0 0 auto;
+  font-variant-numeric: tabular-nums;
+  font-size: 0.72rem;
+  font-weight: 500;
+  color: #6b7280;
+  min-width: 42px;
+}
+
+.cal-daypop-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cal-daypop-fav {
+  flex: 0 0 auto;
+  font-size: 0.74rem;
+  line-height: 1;
+  color: #f59e0b;
+}
+
+.cal-daypop-row--overdue .cal-daypop-time {
+  color: #b91c1c;
+}
+
+.cal-daypop-row--upcoming .cal-daypop-time {
+  color: #166534;
+}
+
+.cal-daypop-row--done .cal-daypop-text {
+  text-decoration: line-through;
+  color: #1d4ed8;
+  opacity: 0.85;
 }
 
 /* ---- Responsive: shrink cells gracefully on narrow widths ---- */

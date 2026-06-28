@@ -62,19 +62,23 @@
           <button id="favFilterBtn" class="filter-toggle" data-active="false">
             ★ Favorites
           </button>
+          <button id="recurFilterBtn" class="filter-toggle" data-active="false">
+            🔁 Repeating
+          </button>
           <div class="view-toggle" role="group">
-            <button class="view-toggle-btn" id="viewListBtn" data-view="list">
-              ☰ List
-            </button>
             <button
               class="view-toggle-btn active"
-              id="viewGridBtn"
-              data-view="grid"
+              id="viewListBtn"
+              data-view="list"
             >
+              ☰ List
+            </button>
+            <button class="view-toggle-btn" id="viewGridBtn" data-view="grid">
               ▦ Grid
             </button>
           </div>
         </div>
+        <div class="sort-header hidden" id="activeSortHeader"></div>
         <div id="activeList" class="list-grid"></div>
       </section>
 
@@ -82,6 +86,23 @@
         <div class="panel-header">
           <h2>Calendar</h2>
           <p>See everything you have planned at a glance.</p>
+        </div>
+        <div class="list-toolbar">
+          <input
+            type="text"
+            id="calSearch"
+            class="search-input"
+            placeholder="Search reminders..."
+          />
+          <select id="calTagFilter" class="filter-select">
+            <option value="">All tags</option>
+          </select>
+          <button id="calFavBtn" class="filter-toggle" data-active="false">
+            ★ Favorites
+          </button>
+          <button id="calRecurBtn" class="filter-toggle" data-active="false">
+            🔁 Repeating
+          </button>
         </div>
         <div id="calendarContainer"></div>
       </section>
@@ -112,12 +133,24 @@
             <button id="cancelDelete" class="secondary-btn">Cancel</button>
           </div>
         </div>
-        <input
-          type="text"
-          id="historySearch"
-          class="search-input"
-          placeholder="Search completed..."
-        />
+        <div class="list-toolbar">
+          <input
+            type="text"
+            id="historySearch"
+            class="search-input"
+            placeholder="Search completed..."
+          />
+          <select id="histTagFilter" class="filter-select">
+            <option value="">All tags</option>
+          </select>
+          <button id="histFavBtn" class="filter-toggle" data-active="false">
+            ★ Favorites
+          </button>
+          <button id="histRecurBtn" class="filter-toggle" data-active="false">
+            🔁 Repeating
+          </button>
+        </div>
+        <div class="sort-header hidden" id="historySortHeader"></div>
         <div id="historyList" class="list-grid"></div>
       </section>
 
@@ -174,12 +207,84 @@
 
         <div class="modal-body">
           <label id="modalTextLabel" for="modalText">Reminder text</label>
-          <input type="text" id="modalText" placeholder="Reminder text" />
+          <div class="text-row">
+            <button type="button" id="modalEmojiBtn" class="emoji-btn emoji-btn--empty" title="Choose emoji">
+              🙂
+            </button>
+            <input type="text" id="modalText" placeholder="Reminder text" />
+            <div class="emoji-pop hidden" id="emojiPop"></div>
+          </div>
 
-          <label id="modalWhenLabel" for="modalTime">Date &amp; time</label>
-          <input type="datetime-local" id="modalTime" />
-          <div class="quick-options" id="quickOptions"></div>
-          <div class="quick-options" id="timeOptions"></div>
+          <div class="modal-when-head">
+            <label id="modalWhenLabel">Date &amp; time</label>
+            <div class="dt-head-actions">
+              <button type="button" id="dtNowBtn" class="dt-cal-btn dt-now-btn" title="Set to the current time">
+                🕒 <span id="dtNowBtnText">Now</span>
+              </button>
+              <button type="button" id="dtCalendarBtn" class="dt-cal-btn" title="Pick from calendar">
+                📅 <span id="dtCalendarBtnText">Calendar</span>
+              </button>
+              <input
+                type="date"
+                id="dtCalendarInput"
+                class="dt-cal-input"
+                tabindex="-1"
+                aria-hidden="true"
+              />
+            </div>
+          </div>
+          <div class="dt-grid">
+            <div class="dt-field" data-field="year">
+              <span class="dt-cap" id="dtYearCap">Year</span>
+              <div class="dt-input-wrap">
+                <input type="text" id="dtYear" class="dt-input" inputmode="numeric" maxlength="4" />
+                <button type="button" class="dt-caret" tabindex="-1">▾</button>
+              </div>
+              <div class="dt-menu" id="dtYearMenu"></div>
+            </div>
+            <div class="dt-field" data-field="month">
+              <span class="dt-cap" id="dtMonthCap">Month</span>
+              <div class="dt-input-wrap">
+                <input type="text" id="dtMonth" class="dt-input" inputmode="numeric" maxlength="2" />
+                <button type="button" class="dt-caret" tabindex="-1">▾</button>
+              </div>
+              <div class="dt-menu" id="dtMonthMenu"></div>
+            </div>
+            <div class="dt-field" data-field="day">
+              <span class="dt-cap" id="dtDayCap">Day</span>
+              <div class="dt-input-wrap">
+                <input type="text" id="dtDay" class="dt-input" inputmode="numeric" maxlength="2" />
+                <button type="button" class="dt-caret" tabindex="-1">▾</button>
+              </div>
+              <div class="dt-menu" id="dtDayMenu"></div>
+            </div>
+            <div class="dt-field" data-field="hour">
+              <span class="dt-cap" id="dtHourCap">Hour</span>
+              <div class="dt-input-wrap">
+                <input type="text" id="dtHour" class="dt-input" inputmode="numeric" maxlength="2" />
+                <button type="button" class="dt-caret" tabindex="-1">▾</button>
+              </div>
+              <div class="dt-menu" id="dtHourMenu"></div>
+            </div>
+            <div class="dt-field" data-field="minute">
+              <span class="dt-cap" id="dtMinuteCap">Min</span>
+              <div class="dt-input-wrap">
+                <input type="text" id="dtMinute" class="dt-input" inputmode="numeric" maxlength="2" />
+                <button type="button" class="dt-caret" tabindex="-1">▾</button>
+              </div>
+              <div class="dt-menu" id="dtMinuteMenu"></div>
+            </div>
+          </div>
+          <p class="dt-hint" id="dtHint"></p>
+
+          <div class="quick-group">
+            <span class="quick-cap" id="quickDayCap">Jump to a day</span>
+            <div class="quick-row" id="quickOptions"></div>
+          </div>
+          <div class="quick-group">
+            <span class="quick-cap" id="quickTimeCap">Time of day</span>
+            <div class="quick-row quick-row--time" id="timeOptions"></div>
+          </div>
 
           <label id="modalRepeatLabel" for="modalRecurrence">Repeat</label>
           <select id="modalRecurrence" class="filter-select">
@@ -191,20 +296,13 @@
             <option value="yearly">Yearly</option>
           </select>
 
-          <label id="modalTagsLabel">Tags</label>
-          <div id="modalTagChips" class="tag-toggle-row"></div>
-          <div class="tag-add-row">
-            <input type="text" id="modalNewTag" placeholder="New tag" />
-            <button type="button" id="modalAddTag" class="quick-btn">Add</button>
-            <button
-              type="button"
-              id="modalManageTags"
-              class="quick-btn"
-              title="Edit tags"
-            >
-              ✎
+          <div class="tags-head">
+            <label id="modalTagsLabel">Tags</label>
+            <button type="button" id="modalManageTags" class="tag-manage-link">
+              ＋ New / manage
             </button>
           </div>
+          <div id="modalTagChips" class="tag-toggle-row"></div>
 
           <p class="modal-error" id="modalError"></p>
         </div>
@@ -212,6 +310,45 @@
         <div class="modal-actions">
           <button class="secondary-btn" id="modalCancel">Cancel</button>
           <button class="primary-btn" id="modalSave">Save</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Tag manager popup -->
+    <div id="tagManagerModal" class="modal-overlay tag-overlay hidden">
+      <div class="modal modal--tags">
+        <div class="modal-head">
+          <h2 id="tagMgrTitle">Manage tags</h2>
+          <button id="tagMgrClose" class="modal-close" title="Close">✕</button>
+        </div>
+        <div class="modal-body">
+          <div class="tag-add-row">
+            <input type="text" id="tagMgrInput" placeholder="New tag" />
+            <button type="button" id="tagMgrAdd" class="primary-btn tag-add-btn">
+              Add
+            </button>
+          </div>
+          <div id="tagMgrList" class="tag-mgr-list"></div>
+        </div>
+        <div class="modal-actions">
+          <button class="primary-btn" id="tagMgrDone">Done</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Reminder preview popup -->
+    <div id="previewModal" class="modal-overlay preview-overlay hidden">
+      <div class="modal modal--preview">
+        <div class="modal-head">
+          <h2 id="previewHeading">Reminder</h2>
+          <button id="previewClose" class="modal-close" title="Close">✕</button>
+        </div>
+        <div class="modal-body">
+          <div id="previewBody"></div>
+        </div>
+        <div class="modal-actions">
+          <button class="secondary-btn" id="previewCloseBtn">Close</button>
+          <button class="primary-btn" id="previewEdit">Edit</button>
         </div>
       </div>
     </div>
