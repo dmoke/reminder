@@ -101,10 +101,10 @@ You can change the data folder at any time from the app's Settings panel, and op
 
 ### Backups
 
-To guard against data loss across updates, the app keeps an automatic backup in a
-`backups/` subfolder of your data folder. The backup is a single, self-describing
-JSON file named `reminder-backup-<timestamp>.json` that bundles **both** data
-files together with the app and format versions that wrote it:
+To guard against data loss across updates, the app keeps an automatic backup of
+your reminders. The backup is a single, self-describing JSON file named
+`reminder-backup-<timestamp>.json` that bundles **both** data files together with
+the app and format versions that wrote it:
 
 ```json
 {
@@ -119,6 +119,15 @@ files together with the app and format versions that wrote it:
 }
 ```
 
+- **Where backups live** — in a stable per-user app directory **outside your
+  data folder**: `%APPDATA%\reminder\backups\<data-folder>\`. Keeping them off the
+  data folder (which may live on OneDrive, or be moved or deleted) means the
+  backup survives even if that folder is moved, deleted, or un-synced — the exact
+  "I lost my stuff" case the backup exists for. Backups are namespaced per data
+  folder, so switching folders never overwrites another folder's snapshot. Open
+  it from **Settings → Open backups folder**. (Older backups that lived inside a
+  `backups/` subfolder of the data folder are carried over automatically on first
+  launch.)
 - **When backups are taken** — on startup at most once every 12 hours, and
   **always** immediately when the app version changes, so the exact state from
   before an update is captured before the new version touches anything. (For
@@ -129,11 +138,11 @@ files together with the app and format versions that wrote it:
   accumulates files. Right after an update that single file is the pre-update
   snapshot (captured before the new version touched anything); it refreshes to
   the current state on a later launch.
-- **Restoring** — open the `backups/` folder (Settings → **Open backups
-  folder**), and copy the `reminders` / `history` arrays from the snapshot's
-  `data` field back into `reminders.json` / `history.json` (with the app closed).
-  If you hit a problem after an update, sharing the backup file is enough to
-  recover or diagnose your reminders.
+- **Restoring** — open the backups folder (Settings → **Open backups folder**),
+  and copy the `reminders` / `history` arrays from the snapshot's `data` field
+  back into `reminders.json` / `history.json` (with the app closed). If you hit a
+  problem after an update, sharing the backup file is enough to recover or
+  diagnose your reminders.
 
 ## Project structure
 
@@ -142,7 +151,7 @@ reminder/
 ├── app/                 # Electron main process
 │   ├── main.js          # App entry: windows, IPC handlers, lifecycle, CSP
 │   ├── storage.js       # JSON persistence (reminders.json / history.json)
-│   ├── backup.js        # Versioned snapshots of the dataset (backups/ folder)
+│   ├── backup.js        # Versioned snapshots of the dataset (per-user app backups dir)
 │   ├── scheduler.js     # 1s polling + due-reminder toast notifications
 │   ├── tray.js          # System tray icon and context menu
 │   ├── config.js        # Loads/saves config.json in userData

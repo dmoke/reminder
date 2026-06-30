@@ -12,6 +12,7 @@
 
 const fs = require("fs");
 const path = require("path");
+const crypto = require("crypto");
 
 // Envelope identity. Bump FORMAT_VERSION only if the envelope shape below
 // changes incompatibly; readers should tolerate older values.
@@ -37,6 +38,60 @@ const SOURCES = [
   { key: "reminders", file: "reminders.json" },
   { key: "history", file: "history.json" },
 ];
+
+// The directory snapshots are written to / read from. Defaults to a `backups/`
+// folder INSIDE the data folder (the legacy layout, still used by the tests),
+// but the app overrides it via opts.backupDir with a stable location OUTSIDE the
+// data folder (see main.js). Keeping backups off the data folder means deleting,
+// moving, or un-syncing that folder (it may live on OneDrive) can't take its own
+// safety net down with it.
+function backupDirFor(dataPath, opts = {}) {
+  return opts.backupDir || path.join(dataPath, BACKUP_DIR);
+}
+
+// Stable, filesystem-safe identifier for a data folder, used to namespace its
+// backups under the shared app backups root so two different data folders — or a
+// folder you later switch away from — never overwrite each other's snapshots. A
+// readable basename prefix keeps the folders recognizable; the hash makes the
+// full path unambiguous (and case-insensitive on Windows, where paths are).
+function dataFolderKey(dataPath) {
+  const norm = path.resolve(dataPath || ".").replace(/[\\/]+$/, "");
+  const canon = process.platform === "win32" ? norm.toLowerCase() : norm;
+  const hash = crypto.createHash("sha1").update(canon).digest("hex").slice(0, 10);
+  const base =
+    path.basename(norm).replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 32) || "data";
+  return `${base}-${hash}`;
+}
+
+// Carry snapshots from a legacy backups folder into a new location, never
+// overwriting an existing file. Best-effort and non-destructive: the originals
+// are left untouched, so this is safe to run on every launch. Used once when
+// backups move out of the data folder, so version-change history stays
+// continuous and no prior snapshot is orphaned.
+function migrateLegacyBackups(legacyDir, newDir) {
+  let names;
+  try {
+    names = fs.readdirSync(legacyDir);
+  } catch {
+    return { migrated: [] };
+  }
+  const migrated = [];
+  for (const name of names) {
+    if (!FILE_RE.test(name)) continue;
+    const src = path.join(legacyDir, name);
+    const dest = path.join(newDir, name);
+    try {
+      if (!fs.statSync(src).isFile()) continue;
+      if (fs.existsSync(dest)) continue; // never clobber an existing backup
+      fs.mkdirSync(newDir, { recursive: true });
+      fs.copyFileSync(src, dest);
+      migrated.push(dest);
+    } catch {
+      // best-effort: a single un-copyable file must not abort startup
+    }
+  }
+  return { migrated };
+}
 
 // Read one source file. Returns exactly one of:
 //   { missing: true }   — file does not exist (ENOENT)
@@ -137,16 +192,15 @@ function fileNameFor(createdAt) {
 // Atomic write (temp + rename), mirroring storage.js. Crucially this NEVER
 // overwrites an existing backup: if two snapshots land on the same millisecond
 // timestamp, a counter suffix is appended so no prior backup is ever destroyed.
-function writeSnapshot(dataPath, snapshot) {
-  const dir = path.join(dataPath, BACKUP_DIR);
-  fs.mkdirSync(dir, { recursive: true });
+function writeSnapshot(backupDir, snapshot) {
+  fs.mkdirSync(backupDir, { recursive: true });
   const base = fileNameFor(snapshot.createdAt);
-  let dest = path.join(dir, base);
+  let dest = path.join(backupDir, base);
   if (fs.existsSync(dest)) {
     const stem = base.slice(0, -".json".length);
     let i = 1;
     do {
-      dest = path.join(dir, `${stem}-${i}.json`);
+      dest = path.join(backupDir, `${stem}-${i}.json`);
       i += 1;
     } while (fs.existsSync(dest));
   }
@@ -159,8 +213,8 @@ function writeSnapshot(dataPath, snapshot) {
 // List our backups, newest first. Each entry carries the parsed envelope's
 // metadata when available. Ordering falls back to file mtime whenever createdAt
 // is missing OR unparseable, so a single garbled file can never wedge the sort.
-function listBackups(dataPath) {
-  const dir = path.join(dataPath, BACKUP_DIR);
+function listBackups(dataPath, backupDir) {
+  const dir = backupDir || path.join(dataPath, BACKUP_DIR);
   let names;
   try {
     names = fs.readdirSync(dir);
@@ -196,6 +250,15 @@ function listBackups(dataPath) {
     const appVersion = env && env.appVersion != null ? env.appVersion : null;
     const dataVersion =
       env && env.dataVersion != null ? env.dataVersion : appVersion;
+    // Which sources this snapshot actually captured as data (an array — possibly
+    // empty, which legitimately means "zero reminders"). A source omitted because
+    // it was unreadable, or preserved as a raw/odd-shape envelope, is NOT counted.
+    // prune() uses this so an incomplete later snapshot can't evict the last good
+    // copy of a source.
+    const captured = {};
+    for (const { key } of SOURCES) {
+      captured[key] = !!(env && env.data && Array.isArray(env.data[key]));
+    }
     out.push({
       name,
       path: full,
@@ -204,6 +267,7 @@ function listBackups(dataPath) {
       createdAt,
       sortKey,
       valid,
+      captured,
     });
   }
   out.sort((a, b) => {
@@ -215,11 +279,26 @@ function listBackups(dataPath) {
 
 // Prune old backups, keeping the newest `keep`. Pass a precomputed `list`
 // (newest-first) to avoid re-reading the folder.
-function prune(dataPath, keep = DEFAULT_KEEP, list = null) {
-  const all = list || listBackups(dataPath); // newest first
+//
+// Content-aware safety: beyond the newest `keep`, the newest snapshot that
+// actually captured each source is also protected from deletion. This stops an
+// incomplete later snapshot from evicting the last good copy of a source — e.g.
+// a transient read lock (OneDrive/AV) during a forced version-change backup
+// yields a snapshot that omits `reminders`; without this guard, pruning to
+// keep=1 would delete the older snapshot that still holds the real reminders.
+// The set of protected files self-heals: once a fresh snapshot captures every
+// source again, it becomes the sole protected holder and the extras are pruned.
+function prune(dataPath, keep = DEFAULT_KEEP, list = null, backupDir) {
+  const all = list || listBackups(dataPath, backupDir); // newest first
   if (all.length <= keep) return [];
+  const protectedPaths = new Set();
+  for (const { key } of SOURCES) {
+    const holder = all.find((b) => b.captured && b.captured[key]);
+    if (holder) protectedPaths.add(holder.path);
+  }
   const removed = [];
   for (const b of all.slice(keep)) {
+    if (protectedPaths.has(b.path)) continue; // sole good copy of some source
     try {
       fs.rmSync(b.path);
       removed.push(b.path);
@@ -233,12 +312,28 @@ function prune(dataPath, keep = DEFAULT_KEEP, list = null) {
 // Create a backup unconditionally, then prune.
 function createBackup(dataPath, appVersion, reason, opts = {}) {
   const keep = opts.keep ?? DEFAULT_KEEP;
+  let backupDir = backupDirFor(dataPath, opts);
   const snapshot = buildSnapshot(dataPath, appVersion, reason, {
     now: opts.now,
     dataVersion: opts.dataVersion,
   });
-  const dest = writeSnapshot(dataPath, snapshot);
-  prune(dataPath, keep);
+  let dest;
+  try {
+    dest = writeSnapshot(backupDir, snapshot);
+  } catch (err) {
+    // The configured backup dir (e.g. the app's userData) is unwritable — a
+    // locked-down/roaming profile, a full disk, or a non-directory squatting at
+    // the path. Rather than take NO backup, fall back to a `backups/` folder
+    // inside the data folder, so a writable data folder always yields a snapshot.
+    const legacy = path.join(dataPath, BACKUP_DIR);
+    if (path.resolve(backupDir) === path.resolve(legacy)) throw err;
+    console.error(
+      `backup: ${backupDir} unwritable (${err.message}); falling back to ${legacy}`,
+    );
+    backupDir = legacy;
+    dest = writeSnapshot(backupDir, snapshot);
+  }
+  prune(dataPath, keep, null, backupDir);
   return { path: dest, snapshot };
 }
 
@@ -252,8 +347,24 @@ function maybeBackupOnStartup(dataPath, appVersion, opts = {}) {
   const now = opts.now || new Date();
   const nowMs = now.getTime();
   const version = appVersion || null;
+  const backupDir = backupDirFor(dataPath, opts);
 
-  const existing = listBackups(dataPath);
+  // First launch after backups moved out of the data folder: carry any existing
+  // in-data-folder snapshots over so version-change detection stays continuous
+  // and nothing is orphaned (non-destructive — the originals are left in place).
+  // Gated on an EMPTY store so it runs at most once: otherwise a relaunch within
+  // the daily window would re-copy a snapshot that prune deliberately removed,
+  // resurrecting it and breaking the retention count.
+  let existing = listBackups(dataPath, backupDir);
+  if (
+    existing.length === 0 &&
+    opts.migrateFrom &&
+    path.resolve(opts.migrateFrom) !== path.resolve(backupDir)
+  ) {
+    migrateLegacyBackups(opts.migrateFrom, backupDir);
+    existing = listBackups(dataPath, backupDir);
+  }
+
   // Base the decision on the newest VALID backup so a corrupt/stray file (which
   // lists with appVersion=null) can't wedge us into a "version-change" backup
   // on every single launch.
@@ -278,6 +389,7 @@ function maybeBackupOnStartup(dataPath, appVersion, opts = {}) {
     keep,
     now,
     dataVersion,
+    backupDir,
   });
   return { created: true, reason, path: p, snapshot };
 }
@@ -327,10 +439,17 @@ function hasLiveData(dataPath) {
 // recovery and for a future legacy-migration path.
 function restore(backupPath, dataPath, appVersion, opts = {}) {
   const env = loadBackup(backupPath);
+  const backupDir = backupDirFor(dataPath, opts);
 
   let safety = null;
   try {
-    safety = createBackup(dataPath, appVersion, "pre-restore").path;
+    // keep:Infinity so this safety snapshot never prunes its siblings — in the
+    // shared backup dir the file being restored FROM lives alongside it, and
+    // pruning to keep=1 would delete that very backup mid-restore.
+    safety = createBackup(dataPath, appVersion, "pre-restore", {
+      backupDir,
+      keep: Infinity,
+    }).path;
   } catch (err) {
     if (!opts.force && hasLiveData(dataPath)) {
       throw new Error(
@@ -385,4 +504,6 @@ module.exports = {
   loadBackup,
   restore,
   hasLiveData,
+  dataFolderKey,
+  migrateLegacyBackups,
 };

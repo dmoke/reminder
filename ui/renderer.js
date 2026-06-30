@@ -287,7 +287,7 @@ function closePreview() {
 }
 
 function formatDate(value) {
-  return new Date(value).toLocaleString([], {
+  return new Date(value).toLocaleString(currentLang, {
     weekday: "short",
     month: "short",
     day: "numeric",
@@ -303,7 +303,7 @@ function formatDateOnly(value) {
   if (isNaN(d.getTime())) return "";
   const sameYear = d.getFullYear() === new Date().getFullYear();
   return d.toLocaleDateString(
-    [],
+    currentLang,
     sameYear
       ? { weekday: "short", month: "short", day: "numeric" }
       : { weekday: "short", year: "numeric", month: "short", day: "numeric" },
@@ -316,11 +316,18 @@ function formatCreated(value) {
   if (isNaN(d.getTime())) return "";
   const sameYear = d.getFullYear() === new Date().getFullYear();
   return d.toLocaleDateString(
-    [],
+    currentLang,
     sameYear
       ? { month: "short", day: "numeric" }
       : { year: "numeric", month: "short", day: "numeric" },
   );
+}
+
+// Localized short unit markers, mirroring the alert popup's abbreviations.
+function durationUnit(kind) {
+  const uk = { d: "д", h: "год", m: "хв" };
+  const en = { d: "d", h: "h", m: "m" };
+  return (currentLang === "uk" ? uk : en)[kind] || kind;
 }
 
 function formatRemainingTime(ms) {
@@ -328,9 +335,12 @@ function formatRemainingTime(ms) {
   const days = Math.floor(totalSeconds / 86400);
   const hours = Math.floor((totalSeconds % 86400) / 3600);
   const minutes = Math.floor((totalSeconds % 3600) / 60);
-  if (days > 0) return `${days}d ${hours}h`;
-  if (hours > 0) return `${hours}h ${minutes}m`;
-  return `${minutes}m`;
+  const d = durationUnit("d");
+  const h = durationUnit("h");
+  const m = durationUnit("m");
+  if (days > 0) return `${days}${d} ${hours}${h}`;
+  if (hours > 0) return `${hours}${h} ${minutes}${m}`;
+  return `${minutes}${m}`;
 }
 
 // Relative time bucket for the card badge / left-border color.
@@ -481,7 +491,9 @@ const translations = {
     "backup-label": "Backups:",
     "backup-desc":
       "Latest snapshot (reminder-backup-<date>.json), refreshed on launch and " +
-      "after updates. Share it to restore your reminders.",
+      "after updates. Kept in a safe app folder outside your data folder, so it " +
+      "survives the data folder being moved or deleted. Share it to restore your " +
+      "reminders.",
     "open-backups-btn": "Open backups folder",
     "language-label": "Language:",
     "lang-en": "English",
@@ -507,6 +519,7 @@ const translations = {
     "card-btn-delete": "Delete",
     "card-btn-remove": "Remove",
     "confirm-delete": "Click to confirm",
+    "confirm-complete": "Click to confirm",
     "snooze-10m": "10m",
     "snooze-1d": "1d",
     "snooze-2d": "2d",
@@ -626,7 +639,9 @@ const translations = {
     "backup-label": "Резервні копії:",
     "backup-desc":
       "Останній знімок (reminder-backup-<дата>.json), оновлюється під час " +
-      "запуску та після оновлень. Поділіться ним, щоб відновити нагадування.",
+      "запуску та після оновлень. Зберігається в безпечній папці застосунку поза " +
+      "вашою папкою з даними, тож не втрачається, якщо ту папку перемістити чи " +
+      "видалити. Поділіться ним, щоб відновити нагадування.",
     "open-backups-btn": "Відкрити папку резервних копій",
     "language-label": "Мова:",
     "lang-en": "English",
@@ -652,6 +667,7 @@ const translations = {
     "card-btn-delete": "Видалити",
     "card-btn-remove": "Видалити",
     "confirm-delete": "Натисніть, щоб підтвердити",
+    "confirm-complete": "Натисніть, щоб підтвердити",
     "snooze-10m": "10 хв",
     "snooze-1d": "1 д",
     "snooze-2d": "2 д",
@@ -868,8 +884,25 @@ function createCard(reminder, isHistory) {
   if (!isHistory) {
     const complete = document.createElement("button");
     complete.className = "card-action";
-    complete.textContent = t("card-btn-complete");
+    const completeLabel = t("card-btn-complete");
+    complete.textContent = completeLabel;
+    // Mirror the delete button's two-step arm/confirm: first click asks for
+    // confirmation (auto-resets after 3s), second click commits.
+    let completeArmed = false;
+    let completeArmTimer = null;
     complete.addEventListener("click", async () => {
+      if (!completeArmed) {
+        completeArmed = true;
+        complete.textContent = t("confirm-complete");
+        complete.classList.add("armed-complete");
+        completeArmTimer = setTimeout(() => {
+          completeArmed = false;
+          complete.textContent = completeLabel;
+          complete.classList.remove("armed-complete");
+        }, 3000);
+        return;
+      }
+      if (completeArmTimer) clearTimeout(completeArmTimer);
       complete.disabled = true; // guard against rapid double-click
       await electronAPI.archiveReminder(reminder.id, reminder.time);
       reload();
@@ -1090,10 +1123,10 @@ function applyViewMode() {
     list.classList.toggle("grid-view", viewMode === "grid");
     list.classList.toggle("list-view", viewMode === "list");
   });
-  const listBtn = document.getElementById("viewListBtn");
-  const gridBtn = document.getElementById("viewGridBtn");
-  if (listBtn) listBtn.classList.toggle("active", viewMode === "list");
-  if (gridBtn) gridBtn.classList.toggle("active", viewMode === "grid");
+  // Both panels (active + completed) share viewMode, so keep every toggle in sync.
+  document.querySelectorAll(".view-toggle-btn").forEach((btn) => {
+    btn.classList.toggle("active", btn.dataset.view === viewMode);
+  });
   syncSortHeaders();
   relayout();
 }
@@ -1943,10 +1976,12 @@ function updateAllTranslations() {
   const previewEditBtn = document.getElementById("previewEdit");
   if (previewEditBtn) previewEditBtn.textContent = t("card-btn-edit");
 
-  const viewListBtn = document.getElementById("viewListBtn");
-  const viewGridBtn = document.getElementById("viewGridBtn");
-  if (viewListBtn) viewListBtn.textContent = t("view-list");
-  if (viewGridBtn) viewGridBtn.textContent = t("view-grid");
+  document
+    .querySelectorAll('.view-toggle-btn[data-view="list"]')
+    .forEach((b) => (b.textContent = t("view-list")));
+  document
+    .querySelectorAll('.view-toggle-btn[data-view="grid"]')
+    .forEach((b) => (b.textContent = t("view-grid")));
 
   set(".delete-history-section h3", t("delete-history-title"));
   const deleteBtn = document.getElementById("deleteHistoryBtn");
@@ -2119,15 +2154,13 @@ document.getElementById("histRecurBtn")?.addEventListener("click", (e) => {
   e.currentTarget.dataset.active = histRecur ? "true" : "false";
   loadHistoryFiltered();
 });
-document.getElementById("viewListBtn")?.addEventListener("click", () => {
-  viewMode = "list";
-  localStorage.setItem("viewMode", viewMode);
-  applyViewMode();
-});
-document.getElementById("viewGridBtn")?.addEventListener("click", () => {
-  viewMode = "grid";
-  localStorage.setItem("viewMode", viewMode);
-  applyViewMode();
+// View toggles live on both the active and completed panels; they share viewMode.
+document.querySelectorAll(".view-toggle-btn").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    viewMode = btn.dataset.view;
+    localStorage.setItem("viewMode", viewMode);
+    applyViewMode();
+  });
 });
 
 // Delete-history controls

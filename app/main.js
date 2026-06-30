@@ -100,6 +100,16 @@ const ALERT_STRINGS = {
 };
 
 app.setAppUserModelId("com.reminder.app");
+
+// Development (`npm start`) and the installed build otherwise SHARE one userData
+// dir (%APPDATA%\reminder), so a dev or smoke run silently overwrites the
+// installed app's config.json — including the chosen data-folder path. Give the
+// unpackaged app its own profile so dev/test runs can never clobber the real
+// install's settings or repoint its data folder. Must run before any code reads
+// userData (config is resolved lazily for exactly this reason).
+if (!app.isPackaged) {
+  app.setPath("userData", `${app.getPath("userData")}-dev`);
+}
 console.log("main: starting");
 
 // Last-resort guards so a transient error (e.g. during a BrowserWindow/IPC
@@ -141,6 +151,28 @@ function lang() {
   return config.language === "uk" ? "uk" : "en";
 }
 
+// Where this data folder's backups live: a stable per-user app directory OUTSIDE
+// the data folder, namespaced per data folder. Keeping backups off the (possibly
+// OneDrive-synced, user-movable) data folder means deleting or moving that folder
+// can't take its own safety net down with it; the per-folder namespace stops two
+// data folders from overwriting each other's snapshots.
+function backupDirForData(dataPath) {
+  return path.join(
+    app.getPath("userData"),
+    "backups",
+    Backup.dataFolderKey(dataPath),
+  );
+}
+
+// Run the startup backup for a data folder: snapshot into the app backups dir,
+// carrying over any legacy snapshots that previously lived inside the data folder.
+function runStartupBackup(dataPath) {
+  Backup.safeBackupOnStartup(dataPath, APP_VERSION, {
+    backupDir: backupDirForData(dataPath),
+    migrateFrom: path.join(dataPath, "backups"),
+  });
+}
+
 function initApp() {
   config = Config.load();
   if (!config.dataPath) return false;
@@ -153,8 +185,10 @@ function initApp() {
   // for "I lost my stuff after the update": a separate, shareable, versioned
   // backup of the exact bytes the previous version left — including a corrupt
   // file (which Storage would otherwise rename away on construction). Forced
-  // whenever the app version changed, so every update is captured.
-  Backup.safeBackupOnStartup(config.dataPath, APP_VERSION);
+  // whenever the app version changed, so every update is captured. Stored outside
+  // the data folder (see backupDirForData) so it survives that folder being moved
+  // or deleted.
+  runStartupBackup(config.dataPath);
   storage = new Storage(config.dataPath, notifyRefresh);
   scheduler = new Scheduler(storage, handleDue);
   scheduler.start();
@@ -663,7 +697,7 @@ ipcMain.handle("choose-folder", async () => {
   // Apply the standard backup policy to the newly-chosen folder: a brand-new
   // folder gets an "initial" snapshot; one that already holds a recent
   // same-version backup is left as-is (it is already protected).
-  Backup.safeBackupOnStartup(config.dataPath, APP_VERSION);
+  runStartupBackup(config.dataPath);
   storage = new Storage(config.dataPath, notifyRefresh);
   scheduler.stop();
   scheduler = new Scheduler(storage, handleDue);
@@ -678,7 +712,8 @@ ipcMain.handle("open-folder", async () => {
 });
 ipcMain.handle("open-backups-folder", async () => {
   if (!config.dataPath) return false;
-  const dir = path.join(config.dataPath, "backups");
+  // Backups live in a stable app directory outside the data folder now.
+  const dir = backupDirForData(config.dataPath);
   // The folder normally exists (a backup is taken on launch); ensure it anyway
   // so the button always lands somewhere useful, falling back to the data folder.
   try {

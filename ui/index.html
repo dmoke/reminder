@@ -149,6 +149,22 @@
           <button id="histRecurBtn" class="filter-toggle" data-active="false">
             ⟳ Repeating
           </button>
+          <div class="view-toggle" role="group">
+            <button
+              class="view-toggle-btn active"
+              id="histViewListBtn"
+              data-view="list"
+            >
+              ☰ List
+            </button>
+            <button
+              class="view-toggle-btn"
+              id="histViewGridBtn"
+              data-view="grid"
+            >
+              ▦ Grid
+            </button>
+          </div>
         </div>
         <div class="history-select-bar">
           <label class="select-all-label">
@@ -187,7 +203,9 @@
           </div>
           <p id="backupDesc" class="storage-subtext">
             Latest snapshot (reminder-backup-&lt;date&gt;.json), refreshed on
-            launch and after updates. Share it to restore your reminders.
+            launch and after updates. Kept in a safe app folder outside your data
+            folder, so it survives the data folder being moved or deleted. Share
+            it to restore your reminders.
           </p>
         </div>
         <div class="language-card storage-card--panel">

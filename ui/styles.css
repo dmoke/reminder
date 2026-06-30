@@ -955,6 +955,12 @@ select {
   border-color: #dc2626;
 }
 
+.card-action.armed-complete {
+  background: #16a34a;
+  color: #ffffff;
+  border-color: #16a34a;
+}
+
 .empty-state {
   padding: 32px 24px;
   text-align: center;
