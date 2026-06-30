@@ -18,7 +18,11 @@ const Scheduler = require("./scheduler");
 const { createTray } = require("./tray");
 const { nextOccurrence, RECURRENCES } = require("./recurrence");
 const pichugin = require("./pichugin");
-const { collapseDecision, sanitizeReopenMinutes } = require("./alertState");
+const {
+  collapseDecision,
+  sanitizeReopenSeconds,
+  sanitizeCooldownSeconds,
+} = require("./alertState");
 
 // Read straight from the app's package.json so the version stamped into backups
 // is the real app version (and unambiguous in dev, where app.getVersion() can
@@ -34,11 +38,14 @@ const RAISE_THROTTLE_MS = 20 * 1000;
 // overdue count + how long ago it was collapsed. This lets the user postpone a
 // pile of overdues without losing track. While collapsed the alert never
 // auto-raises; the full alert returns when a NEW reminder fires or after the
-// configurable timeout (config.collapseReopenMinutes; 0 = never) elapses.
+// configurable timeout (config.collapseReopenSeconds; 0 = never) elapses.
 const MINI_WIDTH = 208;
 const MINI_HEIGHT = 76;
 const MINI_MARGIN = 16; // gap kept from the work-area corner
-const DEFAULT_REOPEN_MIN = 20;
+const DEFAULT_REOPEN_SEC = 10;
+// After resolving a reminder in the alert, its action buttons are disabled for
+// this long so a fast second click can't accidentally resolve the next one.
+const DEFAULT_COOLDOWN_SEC = 1;
 // The main window auto-fits its height to the reminder list: it shrinks down to
 // roughly the page chrome when nearly empty and grows up to a per-display cap
 // (mainWindowMaxHeight, chosen on launch), after which the list scrolls
@@ -185,13 +192,32 @@ function lang() {
   return config.language === "uk" ? "uk" : "en";
 }
 
+// The configured collapse-reopen timeout in seconds, migrating an older
+// minutes-based setting if that's all the config has.
+function reopenSeconds() {
+  if (config.collapseReopenSeconds !== undefined) {
+    return sanitizeReopenSeconds(config.collapseReopenSeconds, DEFAULT_REOPEN_SEC);
+  }
+  if (config.collapseReopenMinutes !== undefined) {
+    return sanitizeReopenSeconds(
+      Number(config.collapseReopenMinutes) * 60,
+      DEFAULT_REOPEN_SEC,
+    );
+  }
+  return DEFAULT_REOPEN_SEC;
+}
+
 // How long a fully-collapsed alert waits before the full window auto-reopens, in
 // ms. 0 means never (only a brand-new reminder reopens it).
 function reopenMs() {
-  return (
-    sanitizeReopenMinutes(config.collapseReopenMinutes, DEFAULT_REOPEN_MIN) *
-    60 *
-    1000
+  return reopenSeconds() * 1000;
+}
+
+// The action-cooldown (seconds) sent to the alert window.
+function cooldownSeconds() {
+  return sanitizeCooldownSeconds(
+    config.alertCooldownSeconds,
+    DEFAULT_COOLDOWN_SEC,
   );
 }
 
@@ -493,6 +519,7 @@ function alertPayload(due, isNew) {
     isNew: !!isNew,
     lang: lang(),
     strings: ALERT_STRINGS[lang()],
+    cooldownMs: cooldownSeconds() * 1000,
     reminders: due.map((r) => ({
       id: r.id,
       text: r.text,
@@ -695,14 +722,20 @@ function pushAlert(due) {
     lastDueKey = ""; // force a fresh render + raise in the full-mode block below
   }
 
+  // Don't yank the window to the top while the user is actively clicking its
+  // buttons — that fights their interaction. A genuinely new reminder still
+  // raises (with its attention cue) regardless.
+  const focused =
+    alertWindow && !alertWindow.isDestroyed() && alertWindow.isFocused();
+
   if (key !== lastDueKey) {
     lastDueKey = key;
     // Beep + flash only when a genuinely new reminder appears, not when the
     // set merely shrinks (one completed/snoozed) or the language changes.
     sendAlertData(due, gainedNew);
-    raiseAlert(gainedNew);
-  } else if (Date.now() - lastRaise > RAISE_THROTTLE_MS) {
-    // Keep it on top even if the user clicked elsewhere.
+    if (gainedNew || !focused) raiseAlert(gainedNew);
+  } else if (Date.now() - lastRaise > RAISE_THROTTLE_MS && !focused) {
+    // Keep it on top even if the user clicked elsewhere (but not mid-interaction).
     raiseAlert(false);
   }
 }
@@ -869,10 +902,8 @@ ipcMain.handle("get-config", () => ({
   dataPath: config.dataPath || "",
   openAtLogin: config.openAtLogin !== false,
   language: lang(),
-  collapseReopenMinutes: sanitizeReopenMinutes(
-    config.collapseReopenMinutes,
-    DEFAULT_REOPEN_MIN,
-  ),
+  collapseReopenSeconds: reopenSeconds(),
+  alertCooldownSeconds: cooldownSeconds(),
 }));
 ipcMain.handle("set-language", (event, value) => {
   config.language = value === "uk" ? "uk" : "en";
@@ -887,13 +918,24 @@ ipcMain.handle("set-login-item", (event, enabled) => {
   applyLoginItemSetting();
   return config.openAtLogin;
 });
-ipcMain.handle("set-collapse-reopen", (event, minutes) => {
-  config.collapseReopenMinutes = sanitizeReopenMinutes(
-    minutes,
-    DEFAULT_REOPEN_MIN,
+ipcMain.handle("set-collapse-reopen", (event, seconds) => {
+  config.collapseReopenSeconds = sanitizeReopenSeconds(
+    seconds,
+    DEFAULT_REOPEN_SEC,
+  );
+  delete config.collapseReopenMinutes; // drop the legacy minutes key
+  Config.save(config);
+  return config.collapseReopenSeconds;
+});
+ipcMain.handle("set-alert-cooldown", (event, seconds) => {
+  config.alertCooldownSeconds = sanitizeCooldownSeconds(
+    seconds,
+    DEFAULT_COOLDOWN_SEC,
   );
   Config.save(config);
-  return config.collapseReopenMinutes;
+  // Push the new value to an open alert so it takes effect immediately.
+  if (currentDue.length) sendAlertData(currentDue, false);
+  return config.alertCooldownSeconds;
 });
 ipcMain.handle("choose-folder", async () => {
   const result = await dialog.showOpenDialog({

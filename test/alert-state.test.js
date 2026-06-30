@@ -2,26 +2,44 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 
 const {
-  ALLOWED_REOPEN_MINUTES,
-  sanitizeReopenMinutes,
+  ALLOWED_REOPEN_SECONDS,
+  sanitizeReopenSeconds,
+  ALLOWED_COOLDOWN_SECONDS,
+  sanitizeCooldownSeconds,
   collapseDecision,
 } = require("../app/alertState.js");
 
-test("sanitizeReopenMinutes accepts the allowed values", () => {
-  for (const v of ALLOWED_REOPEN_MINUTES) {
-    assert.equal(sanitizeReopenMinutes(v), v);
+test("sanitizeCooldownSeconds accepts allowed values, defaults to 1", () => {
+  for (const v of ALLOWED_COOLDOWN_SECONDS) {
+    assert.equal(sanitizeCooldownSeconds(v), v);
   }
-  // String forms (as they arrive from a <select>) coerce cleanly.
-  assert.equal(sanitizeReopenMinutes("20"), 20);
-  assert.equal(sanitizeReopenMinutes("0"), 0);
+  // Fractional options arrive as strings from the <select>.
+  assert.equal(sanitizeCooldownSeconds("0.25"), 0.25);
+  assert.equal(sanitizeCooldownSeconds("0.5"), 0.5);
+  assert.equal(sanitizeCooldownSeconds("1"), 1);
+  assert.equal(sanitizeCooldownSeconds("0"), 0);
+  assert.equal(sanitizeCooldownSeconds(undefined), 1);
+  assert.equal(sanitizeCooldownSeconds(null), 1);
+  assert.equal(sanitizeCooldownSeconds(4), 1); // not offered
+  assert.equal(sanitizeCooldownSeconds("nope"), 1);
 });
 
-test("sanitizeReopenMinutes falls back for unknown / bad input", () => {
-  assert.equal(sanitizeReopenMinutes(undefined), 20);
-  assert.equal(sanitizeReopenMinutes(null), 20);
-  assert.equal(sanitizeReopenMinutes(7), 20); // not an offered value
-  assert.equal(sanitizeReopenMinutes("nope"), 20);
-  assert.equal(sanitizeReopenMinutes(15, 10), 10); // custom fallback
+test("sanitizeReopenSeconds accepts the allowed values", () => {
+  for (const v of ALLOWED_REOPEN_SECONDS) {
+    assert.equal(sanitizeReopenSeconds(v), v);
+  }
+  // String forms (as they arrive from a <select>) coerce cleanly.
+  assert.equal(sanitizeReopenSeconds("10"), 10); // the new 10s default
+  assert.equal(sanitizeReopenSeconds("1200"), 1200);
+  assert.equal(sanitizeReopenSeconds("0"), 0);
+});
+
+test("sanitizeReopenSeconds falls back for unknown / bad input", () => {
+  assert.equal(sanitizeReopenSeconds(undefined), 10); // default is now 10s
+  assert.equal(sanitizeReopenSeconds(null), 10);
+  assert.equal(sanitizeReopenSeconds(7), 10); // not an offered value
+  assert.equal(sanitizeReopenSeconds("nope"), 10);
+  assert.equal(sanitizeReopenSeconds(15, 1200), 1200); // custom fallback
 });
 
 const MIN = 60 * 1000;

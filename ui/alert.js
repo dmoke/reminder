@@ -18,12 +18,48 @@
 
   // Toolbar state (persist across data updates).
   var searchTerm = "";
-  // "overdue" = most overdue first (earliest due time); "recent" = least overdue.
-  var sortDir = "overdue";
+  // "recent" = least overdue first (latest-appearing reminder on top — the
+  // default, so a just-due reminder shows up top); "overdue" = most overdue first.
+  var sortDir = "recent";
 
   // Built-once chrome elements (header/toolbar/list host/bulk host/footer), so a
   // data update only re-renders the list and the search box keeps focus.
   var chrome = null;
+
+  // Keyed row cache (reminder id -> row element). A data update reconciles
+  // against this — adding/removing only the rows that actually changed — instead
+  // of rebuilding the whole list, which used to destroy buttons mid-click. Reset
+  // on a language change (the button labels differ).
+  var rowEls = {};
+  var lastVisible = [];
+  var forceRowRebuild = false;
+  // id -> expiry timestamp for reminders the user just resolved. Incoming
+  // payloads suppress these for a short grace window so a scheduler tick that
+  // fires before the storage write lands can't flicker the row back. After the
+  // window they're honored again, so a genuinely failed action still reappears.
+  var pendingRemoved = {};
+  var PENDING_MS = 2500;
+
+  // After the user resolves a reminder, the alert's action buttons are disabled
+  // for this long (from the payload; settable in Settings) so a fast second click
+  // can't accidentally resolve the next reminder, which may have just shifted up
+  // under the cursor. 0 disables it.
+  var cooldownMs = 1000;
+  var cooldownTimer = null;
+
+  function isCoolingDown() {
+    return cooldownTimer !== null;
+  }
+
+  function startCooldown() {
+    if (!cooldownMs || cooldownMs <= 0) return;
+    if (cooldownTimer !== null) window.clearTimeout(cooldownTimer);
+    if (root) root.classList.add("cooling");
+    cooldownTimer = window.setTimeout(function () {
+      cooldownTimer = null;
+      if (root) root.classList.remove("cooling");
+    }, cooldownMs);
+  }
 
   // setInterval handle for the live "overdue by" refresh.
   var tickTimer = null;
@@ -242,6 +278,25 @@
     });
   }
 
+  // Instant feedback: drop the acted-on reminders from the local set and
+  // re-render right away, rather than waiting up to a second for the scheduler
+  // tick to report the change. Self-heals if the action somehow fails — the
+  // reminder is still due, so the next payload re-adds its row.
+  function optimisticRemove(ids) {
+    var drop = {};
+    var expiry = Date.now() + PENDING_MS;
+    ids.forEach(function (id) {
+      if (id) {
+        drop[id] = true;
+        pendingRemoved[id] = expiry;
+      }
+    });
+    currentReminders = currentReminders.filter(function (r) {
+      return !drop[r.id];
+    });
+    renderList();
+  }
+
   // --- Filtering + sorting ---------------------------------------------------
 
   function getVisible() {
@@ -286,7 +341,10 @@
       var btn = el("button", "alert-btn alert-btn-snooze", opt.label);
       btn.type = "button";
       btn.addEventListener("click", function () {
+        if (isCoolingDown()) return;
         snoozeReminder(id, opt.kind, time);
+        optimisticRemove([id]);
+        startCooldown();
       });
       wrap.appendChild(btn);
     });
@@ -301,6 +359,7 @@
       );
       customBtn.type = "button";
       customBtn.addEventListener("click", function () {
+        if (isCoolingDown()) return;
         callApi(window.alertAPI.edit(id));
       });
       wrap.appendChild(customBtn);
@@ -344,8 +403,11 @@
     var completeBtn = el("button", "alert-btn alert-btn-complete", s("complete"));
     completeBtn.type = "button";
     completeBtn.addEventListener("click", function () {
+      if (isCoolingDown()) return;
       completeBtn.disabled = true; // guard against rapid double-click
       completeReminder(r.id, r.time);
+      optimisticRemove([r.id]);
+      startCooldown();
     });
     actions.appendChild(completeBtn);
     actions.appendChild(buildSnoozeControl(r.id, r.time));
@@ -393,10 +455,37 @@
     toolbar.appendChild(sortBtn);
     root.appendChild(toolbar);
 
-    // List host + bulk host (re-rendered each payload).
+    // List host — rows are reconciled in place (see renderList).
     var listHost = el("div", "alert-list");
     root.appendChild(listHost);
+
+    // Bulk actions: built once and shown only when >1 reminder is visible, so
+    // the buttons aren't destroyed under the cursor on every data update. The
+    // handlers read the live `lastVisible` set, so a search narrows their reach.
     var bulkHost = el("div", "alert-bulk-host");
+    var bulk = el("div", "alert-bulk");
+    var completeAllBtn = el("button", "alert-btn alert-btn-complete");
+    completeAllBtn.type = "button";
+    completeAllBtn.addEventListener("click", function () {
+      if (isCoolingDown()) return;
+      var ids = lastVisible.map(function (r) { return r.id; });
+      completeAll(lastVisible);
+      optimisticRemove(ids);
+      startCooldown();
+    });
+    var snoozeAllBtn = el("button", "alert-btn alert-btn-snooze");
+    snoozeAllBtn.type = "button";
+    snoozeAllBtn.addEventListener("click", function () {
+      if (isCoolingDown()) return;
+      var ids = lastVisible.map(function (r) { return r.id; });
+      snoozeAll("10m", lastVisible);
+      optimisticRemove(ids);
+      startCooldown();
+    });
+    bulk.appendChild(completeAllBtn);
+    bulk.appendChild(snoozeAllBtn);
+    bulkHost.appendChild(bulk);
+    bulkHost.style.display = "none";
     root.appendChild(bulkHost);
 
     // Footer: Open app + Dismiss (static).
@@ -430,6 +519,8 @@
       sortBtn: sortBtn,
       listHost: listHost,
       bulkHost: bulkHost,
+      completeAllBtn: completeAllBtn,
+      snoozeAllBtn: snoozeAllBtn,
       openBtn: openBtn,
       dismissBtn: dismissBtn
     };
@@ -450,47 +541,72 @@
     chrome.search.placeholder = s("search-ph");
     chrome.openBtn.textContent = s("open-app");
     chrome.dismissBtn.textContent = s("dismiss");
+    chrome.completeAllBtn.textContent = s("complete-all");
+    chrome.snoozeAllBtn.textContent = s("snooze-all") + " (" + s("snooze-10m") + ")";
     applySortLabel();
   }
 
-  // Render just the list + bulk actions from the current filter/sort.
+  // Reconcile the list against the current filter/sort: keep existing rows (so
+  // their buttons survive a data update mid-click), removing only the rows that
+  // left and inserting only the rows that arrived, in the right order.
   function renderList() {
     if (!chrome) return;
+
+    // A language change needs fresh rows (button labels differ).
+    if (forceRowRebuild) {
+      chrome.listHost.textContent = "";
+      rowEls = {};
+      forceRowRebuild = false;
+    }
+
     var visible = getVisible();
+    lastVisible = visible;
     chrome.count.textContent = String(currentReminders.length);
 
-    chrome.listHost.textContent = "";
     if (visible.length === 0) {
+      chrome.listHost.textContent = "";
+      rowEls = {};
       chrome.listHost.appendChild(el("div", "alert-empty", s("no-matches")));
-    } else {
-      visible.forEach(function (r) {
-        chrome.listHost.appendChild(buildRow(r));
-      });
+      chrome.bulkHost.style.display = "none";
+      return;
     }
 
-    // Bulk actions when more than one reminder is visible.
-    chrome.bulkHost.textContent = "";
-    if (visible.length > 1) {
-      var bulk = el("div", "alert-bulk");
-      var completeAllBtn = el("button", "alert-btn alert-btn-complete", s("complete-all"));
-      completeAllBtn.type = "button";
-      completeAllBtn.addEventListener("click", function () {
-        completeAll(visible);
-      });
-      bulk.appendChild(completeAllBtn);
-
-      var snoozeAllBtn = el(
-        "button",
-        "alert-btn alert-btn-snooze",
-        s("snooze-all") + " (" + s("snooze-10m") + ")"
-      );
-      snoozeAllBtn.type = "button";
-      snoozeAllBtn.addEventListener("click", function () {
-        snoozeAll("10m", visible);
-      });
-      bulk.appendChild(snoozeAllBtn);
-      chrome.bulkHost.appendChild(bulk);
+    var emptyNode = chrome.listHost.querySelector(".alert-empty");
+    if (emptyNode && emptyNode.parentNode) {
+      emptyNode.parentNode.removeChild(emptyNode);
     }
+
+    var visibleIds = {};
+    visible.forEach(function (r) {
+      visibleIds[r.id] = true;
+    });
+
+    // Drop rows that are no longer visible.
+    Object.keys(rowEls).forEach(function (id) {
+      if (!visibleIds[id]) {
+        var gone = rowEls[id];
+        if (gone && gone.parentNode) gone.parentNode.removeChild(gone);
+        delete rowEls[id];
+      }
+    });
+
+    // Add/keep each visible row, in order. Existing rows are left intact except
+    // for an in-place refresh of their "overdue by" line.
+    visible.forEach(function (r, i) {
+      var node = rowEls[r.id];
+      if (!node) {
+        node = buildRow(r);
+        rowEls[r.id] = node;
+      } else {
+        var rel = node.querySelector(".alert-row-rel");
+        if (rel) rel.textContent = relativeLine(r.time);
+      }
+      if (chrome.listHost.children[i] !== node) {
+        chrome.listHost.insertBefore(node, chrome.listHost.children[i] || null);
+      }
+    });
+
+    chrome.bulkHost.style.display = visible.length > 1 ? "" : "none";
   }
 
   function render() {
@@ -517,9 +633,21 @@
 
   window.alertAPI.onData(function (payload) {
     payload = payload || {};
-    currentReminders = (Array.isArray(payload.reminders) ? payload.reminders : []).map(normalize);
+    var nextLang = payload.lang === "uk" ? "uk" : "en";
+    // A language switch must rebuild the rows so their button labels follow.
+    if (nextLang !== currentLang) forceRowRebuild = true;
+    var incoming = (Array.isArray(payload.reminders) ? payload.reminders : []).map(normalize);
+    // Honor still-active pending removals (suppress the row); expire the rest.
+    var now = Date.now();
+    Object.keys(pendingRemoved).forEach(function (id) {
+      if (pendingRemoved[id] <= now) delete pendingRemoved[id];
+    });
+    currentReminders = incoming.filter(function (r) {
+      return !pendingRemoved[r.id];
+    });
     currentStrings = payload.strings && typeof payload.strings === "object" ? payload.strings : {};
-    currentLang = payload.lang === "uk" ? "uk" : "en";
+    currentLang = nextLang;
+    if (typeof payload.cooldownMs === "number") cooldownMs = payload.cooldownMs;
 
     document.documentElement.setAttribute("lang", currentLang);
 

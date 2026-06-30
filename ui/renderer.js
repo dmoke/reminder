@@ -17,7 +17,8 @@ if (!electronAPI) {
     deleteReminder: async () => {},
     setLoginItem: async () => true,
     setLanguage: async () => "en",
-    setCollapseReopen: async () => 20,
+    setCollapseReopen: async () => 10,
+    setAlertCooldown: async () => 1,
     onRefreshReminders: () => {},
     onOpenAddModal: () => {},
     onOpenEditModal: () => {},
@@ -562,12 +563,25 @@ const translations = {
       "reminders are overdue and how long ago you collapsed it. The full alert " +
       "returns when a new reminder comes due, or after this much time. " +
       "“Never” keeps it collapsed until a new reminder fires.",
-    "reopen-5": "After 5 minutes",
-    "reopen-10": "After 10 minutes",
-    "reopen-20": "After 20 minutes",
-    "reopen-30": "After 30 minutes",
-    "reopen-60": "After 1 hour",
+    "reopen-10s": "10 seconds",
+    "reopen-5m": "After 5 minutes",
+    "reopen-10m": "After 10 minutes",
+    "reopen-20m": "After 20 minutes",
+    "reopen-30m": "After 30 minutes",
+    "reopen-60m": "After 1 hour",
     "reopen-0": "Never",
+    "cooldown-label": "Alert button cooldown:",
+    "cooldown-desc":
+      "After you complete or snooze a reminder in the alert, its buttons are " +
+      "briefly disabled so a fast second click can’t accidentally resolve the " +
+      "next reminder. “Off” disables the delay.",
+    "cooldown-0": "Off",
+    "cooldown-025": "0.25 seconds",
+    "cooldown-05": "0.5 seconds",
+    "cooldown-1": "1 second",
+    "cooldown-2": "2 seconds",
+    "cooldown-3": "3 seconds",
+    "cooldown-5": "5 seconds",
     "card-due-now": "Due now",
     "card-due-prefix": "Due",
     "card-remains-prefix": "in",
@@ -743,12 +757,25 @@ const translations = {
       "показує, скільки нагадувань прострочено та як давно ви його згорнули. " +
       "Повне сповіщення повертається, коли настає нове нагадування, або через " +
       "цей час. «Ніколи» залишає його згорнутим, доки не настане нове нагадування.",
-    "reopen-5": "Через 5 хвилин",
-    "reopen-10": "Через 10 хвилин",
-    "reopen-20": "Через 20 хвилин",
-    "reopen-30": "Через 30 хвилин",
-    "reopen-60": "Через 1 годину",
+    "reopen-10s": "10 секунд",
+    "reopen-5m": "Через 5 хвилин",
+    "reopen-10m": "Через 10 хвилин",
+    "reopen-20m": "Через 20 хвилин",
+    "reopen-30m": "Через 30 хвилин",
+    "reopen-60m": "Через 1 годину",
     "reopen-0": "Ніколи",
+    "cooldown-label": "Затримка кнопок сповіщення:",
+    "cooldown-desc":
+      "Після того як ви виконаєте чи відкладете нагадування у сповіщенні, його " +
+      "кнопки ненадовго вимикаються, щоб швидкий другий клік випадково не " +
+      "опрацював наступне нагадування. «Вимкнено» прибирає затримку.",
+    "cooldown-0": "Вимкнено",
+    "cooldown-025": "0.25 секунди",
+    "cooldown-05": "0.5 секунди",
+    "cooldown-1": "1 секунда",
+    "cooldown-2": "2 секунди",
+    "cooldown-3": "3 секунди",
+    "cooldown-5": "5 секунд",
     "card-due-now": "Час настав",
     "card-due-prefix": "Настане",
     "card-remains-prefix": "через",
@@ -1430,11 +1457,19 @@ async function loadConfig() {
   if (loginToggle) loginToggle.checked = config.openAtLogin !== false;
   const collapseSelect = document.getElementById("collapseReopenSelect");
   if (collapseSelect) {
-    const minutes =
-      config.collapseReopenMinutes === undefined
-        ? 20
-        : config.collapseReopenMinutes;
-    collapseSelect.value = String(minutes);
+    const seconds =
+      config.collapseReopenSeconds === undefined
+        ? 10
+        : config.collapseReopenSeconds;
+    collapseSelect.value = String(seconds);
+  }
+  const cooldownSelect = document.getElementById("alertCooldownSelect");
+  if (cooldownSelect) {
+    const cd =
+      config.alertCooldownSeconds === undefined
+        ? 1
+        : config.alertCooldownSeconds;
+    cooldownSelect.value = String(cd);
   }
 }
 
@@ -2164,12 +2199,26 @@ function updateAllTranslations() {
   const collapseDesc = document.getElementById("collapseDesc");
   if (collapseDesc) collapseDesc.textContent = t("collapse-desc");
   setOptionText("collapseReopenSelect", {
-    "5": "reopen-5",
-    "10": "reopen-10",
-    "20": "reopen-20",
-    "30": "reopen-30",
-    "60": "reopen-60",
+    "10": "reopen-10s",
+    "300": "reopen-5m",
+    "600": "reopen-10m",
+    "1200": "reopen-20m",
+    "1800": "reopen-30m",
+    "3600": "reopen-60m",
     "0": "reopen-0",
+  });
+  const cooldownLabel = document.getElementById("cooldownLabel");
+  if (cooldownLabel) cooldownLabel.textContent = t("cooldown-label");
+  const cooldownDesc = document.getElementById("cooldownDesc");
+  if (cooldownDesc) cooldownDesc.textContent = t("cooldown-desc");
+  setOptionText("alertCooldownSelect", {
+    "0": "cooldown-0",
+    "0.25": "cooldown-025",
+    "0.5": "cooldown-05",
+    "1": "cooldown-1",
+    "2": "cooldown-2",
+    "3": "cooldown-3",
+    "5": "cooldown-5",
   });
 
   // Modal labels
@@ -2432,6 +2481,18 @@ document
       await electronAPI.setCollapseReopen(parseInt(e.target.value, 10));
     } catch (err) {
       console.error("setCollapseReopen failed", err);
+    }
+  });
+
+// Alert action-button cooldown
+document
+  .getElementById("alertCooldownSelect")
+  ?.addEventListener("change", async (e) => {
+    try {
+      // Number() not parseInt() — the value can be fractional (0.25 / 0.5).
+      await electronAPI.setAlertCooldown(Number(e.target.value));
+    } catch (err) {
+      console.error("setAlertCooldown failed", err);
     }
   });
 

@@ -26,6 +26,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
   setLanguage: (lang) => ipcRenderer.invoke("set-language", lang),
   setCollapseReopen: (minutes) =>
     ipcRenderer.invoke("set-collapse-reopen", minutes),
+  setAlertCooldown: (seconds) =>
+    ipcRenderer.invoke("set-alert-cooldown", seconds),
   onRefreshReminders: (callback) =>
     ipcRenderer.on("refresh-reminders", callback),
   onOpenAddModal: (callback) => ipcRenderer.on("open-add-modal", callback),

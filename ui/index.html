@@ -255,11 +255,12 @@
           <div class="storage-row">
             <p id="collapseLabel">Reopen collapsed alert:</p>
             <select id="collapseReopenSelect" class="filter-select">
-              <option value="5">After 5 minutes</option>
-              <option value="10">After 10 minutes</option>
-              <option value="20">After 20 minutes</option>
-              <option value="30">After 30 minutes</option>
-              <option value="60">After 1 hour</option>
+              <option value="10">10 seconds</option>
+              <option value="300">After 5 minutes</option>
+              <option value="600">After 10 minutes</option>
+              <option value="1200">After 20 minutes</option>
+              <option value="1800">After 30 minutes</option>
+              <option value="3600">After 1 hour</option>
               <option value="0">Never</option>
             </select>
           </div>
@@ -268,6 +269,25 @@
             reminders are overdue and how long ago you collapsed it. The full
             alert returns when a new reminder comes due, or after this much time.
             “Never” keeps it collapsed until a new reminder fires.
+          </p>
+        </div>
+        <div class="storage-card storage-card--panel storage-card--stack">
+          <div class="storage-row">
+            <p id="cooldownLabel">Alert button cooldown:</p>
+            <select id="alertCooldownSelect" class="filter-select">
+              <option value="0">Off</option>
+              <option value="0.25">0.25 seconds</option>
+              <option value="0.5">0.5 seconds</option>
+              <option value="1">1 second</option>
+              <option value="2">2 seconds</option>
+              <option value="3">3 seconds</option>
+              <option value="5">5 seconds</option>
+            </select>
+          </div>
+          <p id="cooldownDesc" class="storage-subtext">
+            After you complete or snooze a reminder in the alert, its buttons are
+            briefly disabled so a fast second click can’t accidentally resolve the
+            next reminder. “Off” disables the delay.
           </p>
         </div>
       </section>

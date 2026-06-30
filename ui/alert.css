@@ -122,6 +122,15 @@
   font-weight: 600;
 }
 
+/* Action cooldown: just after resolving a reminder, the resolve/snooze buttons
+   are briefly disabled so a fast second click can't hit the next reminder (which
+   may have shifted up under the cursor). */
+.alert-root.cooling .alert-row-actions .alert-btn,
+.alert-root.cooling .alert-bulk .alert-btn {
+  pointer-events: none;
+  opacity: 0.45;
+}
+
 /* ---- List + rows ---- */
 .alert-list {
   display: grid;
