@@ -202,8 +202,14 @@
           </div>
         </div>
         <div class="storage-card storage-card--panel storage-card--stack">
-          <div class="storage-row">
-            <p id="backupLabel">Backups:</p>
+          <p id="backupLabel">Backups:</p>
+          <div class="storage-actions">
+            <button id="forceBackupBtn" class="secondary-btn">
+              Back up now
+            </button>
+            <button id="loadBackupBtn" class="secondary-btn">
+              Load from backup…
+            </button>
             <button id="openBackupsBtn" class="secondary-btn">
               Open backups folder
             </button>
@@ -212,8 +218,11 @@
             Latest snapshot (reminder-backup-&lt;date&gt;.json), refreshed on
             launch and after updates. Kept in a safe app folder outside your data
             folder, so it survives the data folder being moved or deleted. Share
-            it to restore your reminders.
+            it to restore your reminders. “Back up now” snapshots the current
+            reminders; “Load from backup…” merges a snapshot back in, adding only
+            reminders you don't already have.
           </p>
+          <p id="backupResult" class="storage-subtext import-result hidden"></p>
         </div>
         <div class="storage-card storage-card--panel storage-card--stack">
           <div class="storage-row">

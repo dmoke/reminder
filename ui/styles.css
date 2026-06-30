@@ -546,6 +546,24 @@ button,
   width: 100%;
 }
 
+/* Action-button group inside a stacked storage card — wraps on narrow widths. */
+.storage-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+/* Armed confirm state for a secondary action (load-from-backup is additive, so
+   it gets a blue "confirm" look rather than the red of a destructive action). */
+.secondary-btn.armed {
+  background: #2563eb;
+  color: #fff;
+  border-color: #2563eb;
+}
+.secondary-btn.armed:hover {
+  background: #1d4ed8;
+}
+
 #dataPath {
   color: #334155;
   font-size: 0.95rem;

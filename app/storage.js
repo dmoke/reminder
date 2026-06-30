@@ -169,6 +169,70 @@ class Storage {
     return { added, completed, skipped, total: list.length };
   }
 
+  // Merge reminders from a backup envelope's `data` into the live store WITHOUT
+  // overwriting anything: only entries whose `id` is not already present (in the
+  // active list OR history) are added, so re-loading the same backup — or loading
+  // one that overlaps the current data — is safe and idempotent. Active and
+  // completed entries keep the active/history split the snapshot captured them in
+  // (backup.data.reminders → active, backup.data.history → history), and the batch
+  // is de-duplicated against itself too. Non-array sources (a raw/odd-shape
+  // envelope from a corrupt snapshot) and non-object entries are ignored.
+  //
+  // Pass { dryRun: true } to compute the same summary WITHOUT writing — used to
+  // preview "loading this backup would add N reminders" before committing.
+  mergeFromBackup(backupData, opts = {}) {
+    const data = backupData && typeof backupData === "object" ? backupData : {};
+    const incomingActive = Array.isArray(data.reminders) ? data.reminders : [];
+    const incomingHistory = Array.isArray(data.history) ? data.history : [];
+    const history = this.getHistory();
+
+    // Every id already on disk — adding one of these would duplicate it.
+    const seen = new Set();
+    for (const r of this.active) if (r && r.id != null) seen.add(r.id);
+    for (const r of history) if (r && r.id != null) seen.add(r.id);
+
+    const toActive = [];
+    const toHistory = [];
+    let skipped = 0;
+    const collect = (list, dest) => {
+      for (const r of list) {
+        if (!r || typeof r !== "object") {
+          skipped += 1;
+          continue;
+        }
+        if (r.id != null && seen.has(r.id)) {
+          skipped += 1; // already present (or a duplicate within this batch)
+          continue;
+        }
+        if (r.id != null) seen.add(r.id);
+        dest.push(r);
+      }
+    };
+    collect(incomingActive, toActive);
+    collect(incomingHistory, toHistory);
+
+    const summary = {
+      addedActive: toActive.length,
+      addedHistory: toHistory.length,
+      added: toActive.length + toHistory.length,
+      skipped,
+      total: incomingActive.length + incomingHistory.length,
+    };
+    if (opts.dryRun) return summary;
+
+    if (toActive.length) {
+      this.active = this.active.concat(toActive);
+      this.writeFile(this.activePath, this.active);
+    }
+    if (toHistory.length) {
+      // Prepend the snapshot's history (already newest-first) ahead of the
+      // current history, preserving each side's order.
+      this.writeFile(this.historyPath, toHistory.concat(history));
+    }
+    if (summary.added) this.notify();
+    return summary;
+  }
+
   // Complete one occurrence of a recurring reminder: push a completed snapshot
   // to history AND advance the still-active reminder to its next occurrence.
   recurComplete(id, nextTime) {

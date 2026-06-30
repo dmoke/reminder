@@ -10,6 +10,9 @@ if (!electronAPI) {
     chooseFolder: async () => null,
     openFolder: async () => false,
     openBackupsFolder: async () => false,
+    forceBackup: async () => ({ error: "unavailable" }),
+    chooseBackupToLoad: async () => ({ canceled: true }),
+    loadBackup: async () => ({ error: "unavailable" }),
     importReminders: async () => ({ canceled: true }),
     addReminder: async () => {},
     updateReminder: async () => {},
@@ -539,8 +542,21 @@ const translations = {
       "Latest snapshot (reminder-backup-<date>.json), refreshed on launch and " +
       "after updates. Kept in a safe app folder outside your data folder, so it " +
       "survives the data folder being moved or deleted. Share it to restore your " +
-      "reminders.",
+      "reminders. “Back up now” snapshots the current reminders; “Load from " +
+      "backup…” merges a snapshot back in, adding only reminders you don't " +
+      "already have.",
     "open-backups-btn": "Open backups folder",
+    "force-backup-btn": "Back up now",
+    "load-backup-btn": "Load from backup…",
+    "backup-now-done": "Backup saved.",
+    "backup-now-failed": "Backup failed: {error}",
+    "backup-load-preview":
+      "Loading this backup would add {count} extra reminders. " +
+      "Click the button again to confirm.",
+    "backup-load-confirm": "Confirm load ({count})",
+    "backup-load-none": "Nothing to load — this backup adds no new reminders.",
+    "backup-load-done": "Loaded {count} reminders from backup.",
+    "backup-load-failed": "Load failed: {error}",
     "import-label": "Import reminders:",
     "import-btn": "Import from Pichugin Organizer…",
     "import-desc":
@@ -733,8 +749,22 @@ const translations = {
       "Останній знімок (reminder-backup-<дата>.json), оновлюється під час " +
       "запуску та після оновлень. Зберігається в безпечній папці застосунку поза " +
       "вашою папкою з даними, тож не втрачається, якщо ту папку перемістити чи " +
-      "видалити. Поділіться ним, щоб відновити нагадування.",
+      "видалити. Поділіться ним, щоб відновити нагадування. «Зробити копію зараз» " +
+      "створює знімок поточних нагадувань; «Завантажити з копії…» додає зі знімка " +
+      "лише ті нагадування, яких у вас ще немає.",
     "open-backups-btn": "Відкрити папку резервних копій",
+    "force-backup-btn": "Зробити копію зараз",
+    "load-backup-btn": "Завантажити з копії…",
+    "backup-now-done": "Резервну копію збережено.",
+    "backup-now-failed": "Не вдалося створити копію: {error}",
+    "backup-load-preview":
+      "Завантаження цієї копії додасть {count} нових нагадувань. " +
+      "Натисніть кнопку ще раз, щоб підтвердити.",
+    "backup-load-confirm": "Підтвердити завантаження ({count})",
+    "backup-load-none":
+      "Немає чого завантажувати — ця копія не додає нових нагадувань.",
+    "backup-load-done": "Завантажено {count} нагадувань із копії.",
+    "backup-load-failed": "Не вдалося завантажити: {error}",
     "import-label": "Імпорт нагадувань:",
     "import-btn": "Імпортувати з Pichugin Organizer…",
     "import-desc":
@@ -2181,6 +2211,12 @@ function updateAllTranslations() {
   if (backupDesc) backupDesc.textContent = t("backup-desc");
   const openBackupsBtn = document.getElementById("openBackupsBtn");
   if (openBackupsBtn) openBackupsBtn.textContent = t("open-backups-btn");
+  const forceBackupBtn = document.getElementById("forceBackupBtn");
+  if (forceBackupBtn) forceBackupBtn.textContent = t("force-backup-btn");
+  const loadBackupBtn = document.getElementById("loadBackupBtn");
+  // While armed it shows "Confirm load (N)"; don't clobber that mid-confirm.
+  if (loadBackupBtn && !loadBackupBtn.classList.contains("armed"))
+    loadBackupBtn.textContent = t("load-backup-btn");
   const importLabel = document.getElementById("importLabel");
   if (importLabel) importLabel.textContent = t("import-label");
   const importBtn = document.getElementById("importBtn");
@@ -2452,6 +2488,14 @@ document.querySelectorAll(".lang-btn").forEach((btn) => {
       importResultEl.textContent = "";
       importResultEl.classList.add("hidden");
     }
+    // Same for the backup result line, and disarm any pending load (its baked-in
+    // "{count}" sentence is in the old language and can't be re-rendered).
+    const backupResultEl = document.getElementById("backupResult");
+    if (backupResultEl) {
+      backupResultEl.textContent = "";
+      backupResultEl.classList.add("hidden");
+    }
+    resetLoadBackupBtn();
     reload();
   });
 });
@@ -2683,6 +2727,120 @@ document.getElementById("importBtn")?.addEventListener("click", async () => {
     console.error("importReminders failed", err);
     showImportResult(
       t("import-failed").replace("{error}", String((err && err.message) || err)),
+      true,
+    );
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+});
+
+function showBackupResult(message, isError) {
+  const el = document.getElementById("backupResult");
+  if (!el) return;
+  el.textContent = message;
+  el.classList.remove("hidden");
+  el.classList.toggle("import-error", !!isError);
+}
+
+document.getElementById("forceBackupBtn")?.addEventListener("click", async () => {
+  const btn = document.getElementById("forceBackupBtn");
+  if (btn) btn.disabled = true;
+  try {
+    const res = (await electronAPI.forceBackup()) || {};
+    if (res.error) {
+      showBackupResult(t("backup-now-failed").replace("{error}", res.error), true);
+      return;
+    }
+    showBackupResult(t("backup-now-done"), false);
+  } catch (err) {
+    showBackupResult(
+      t("backup-now-failed").replace("{error}", String((err && err.message) || err)),
+      true,
+    );
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+});
+
+// Two-step "load from backup", mirroring the app's arm/confirm idiom for actions
+// that change data: the first click picks a file and PREVIEWS how many new
+// reminders it would add; the second click commits the merge. Re-loading is safe
+// — only reminders not already present are added (deduped by id in main).
+let pendingBackupLoad = null;
+let loadBackupResetTimer = null;
+
+function resetLoadBackupBtn() {
+  pendingBackupLoad = null;
+  if (loadBackupResetTimer) {
+    clearTimeout(loadBackupResetTimer);
+    loadBackupResetTimer = null;
+  }
+  const btn = document.getElementById("loadBackupBtn");
+  if (btn) {
+    btn.classList.remove("armed");
+    btn.textContent = t("load-backup-btn");
+  }
+}
+
+document.getElementById("loadBackupBtn")?.addEventListener("click", async () => {
+  const btn = document.getElementById("loadBackupBtn");
+
+  // Second click while armed → commit the merge for the previewed file.
+  if (pendingBackupLoad) {
+    const filePath = pendingBackupLoad.path;
+    resetLoadBackupBtn();
+    if (btn) btn.disabled = true;
+    try {
+      const res = (await electronAPI.loadBackup(filePath)) || {};
+      if (res.error) {
+        showBackupResult(t("backup-load-failed").replace("{error}", res.error), true);
+        return;
+      }
+      const added = res.added || 0;
+      showBackupResult(
+        added === 0
+          ? t("backup-load-none")
+          : t("backup-load-done").replace("{count}", added),
+        false,
+      );
+      reload(); // surface the newly loaded reminders
+    } catch (err) {
+      showBackupResult(
+        t("backup-load-failed").replace("{error}", String((err && err.message) || err)),
+        true,
+      );
+    } finally {
+      if (btn) btn.disabled = false;
+    }
+    return;
+  }
+
+  // First click → pick a backup file and preview the merge.
+  if (btn) btn.disabled = true;
+  try {
+    const res = (await electronAPI.chooseBackupToLoad()) || {};
+    if (res.canceled) return; // user dismissed the file dialog — say nothing
+    if (res.error) {
+      showBackupResult(t("backup-load-failed").replace("{error}", res.error), true);
+      return;
+    }
+    const extra = res.extra || 0;
+    if (extra === 0) {
+      // Nothing new — no point arming a confirm.
+      showBackupResult(t("backup-load-none"), false);
+      return;
+    }
+    // Arm: announce the count and turn the button into a confirm (auto-resets).
+    pendingBackupLoad = { path: res.path, extra };
+    showBackupResult(t("backup-load-preview").replace("{count}", extra), false);
+    if (btn) {
+      btn.classList.add("armed");
+      btn.textContent = t("backup-load-confirm").replace("{count}", extra);
+    }
+    loadBackupResetTimer = setTimeout(resetLoadBackupBtn, 6000);
+  } catch (err) {
+    showBackupResult(
+      t("backup-load-failed").replace("{error}", String((err && err.message) || err)),
       true,
     );
   } finally {

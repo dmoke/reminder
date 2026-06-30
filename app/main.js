@@ -14,6 +14,7 @@ const { v4: uuidv4 } = require("uuid");
 const Config = require("./config");
 const Storage = require("./storage");
 const Backup = require("./backup");
+const { Logger } = require("./logger");
 const Scheduler = require("./scheduler");
 const { createTray } = require("./tray");
 const { nextOccurrence, RECURRENCES } = require("./recurrence");
@@ -143,7 +144,34 @@ app.setAppUserModelId("com.reminder.app");
 if (!app.isPackaged) {
   app.setPath("userData", `${app.getPath("userData")}-dev`);
 }
-console.log("main: starting");
+
+// File logger: tees the lines below (and every other console.* call in the app,
+// plus the crash handlers) into <dataPath>/logs/reminder.log once the data
+// folder is known. Until then lines are buffered, so a crash during boot is
+// still captured. Pointed at the data folder in initApp() / choose-folder.
+const logger = new Logger();
+installConsoleTee(logger);
+
+// Tee console output into the file logger in addition to stdout/stderr, so the
+// existing console.log/error calls throughout the app — and the crash handlers
+// registered in whenReady — all land in logs/reminder.log for after-the-fact
+// diagnosis (a renderer/GPU crash otherwise only shows in a dev terminal).
+function installConsoleTee(target) {
+  const levels = { log: "INFO", info: "INFO", warn: "WARN", error: "ERROR" };
+  for (const method of Object.keys(levels)) {
+    const original = console[method].bind(console);
+    console[method] = (...args) => {
+      original(...args);
+      try {
+        target.write(levels[method], ...args);
+      } catch {
+        // logging must never break a plain console call
+      }
+    };
+  }
+}
+
+console.log(`main: starting (reminder ${APP_VERSION})`);
 
 // Last-resort guards so a transient error (e.g. during a BrowserWindow/IPC
 // call inside the per-second scheduler tick) is logged rather than crashing
@@ -246,6 +274,11 @@ function runStartupBackup(dataPath) {
 function initApp() {
   config = Config.load();
   if (!config.dataPath) return false;
+  // Route logs into the chosen data folder's logs/ dir and flush anything
+  // buffered during boot. The user asked for logs to live alongside their data
+  // so a crash is diagnosable from the same place they already know to look.
+  logger.setDataPath(config.dataPath);
+  console.log(`main: data folder ${config.dataPath}`);
   // Start with Windows is on by default; persist it explicitly on first run.
   if (config.openAtLogin === undefined) {
     config.openAtLogin = true;
@@ -945,6 +978,9 @@ ipcMain.handle("choose-folder", async () => {
   if (result.canceled) return null;
   config.dataPath = result.filePaths[0];
   Config.save(config);
+  // Logs follow the data folder, so a switch starts writing to the new folder's
+  // logs/ dir from here on.
+  logger.setDataPath(config.dataPath);
   // Apply the standard backup policy to the newly-chosen folder: a brand-new
   // folder gets an "initial" snapshot; one that already holds a recent
   // same-version backup is left as-is (it is already protected).
@@ -1023,6 +1059,83 @@ ipcMain.handle("import-reminders", async () => {
   } catch (err) {
     console.error("import-reminders failed:", err);
     return { canceled: false, error: String((err && err.message) || err) };
+  }
+});
+
+// Take a backup on demand (the "Back up now" button). Same machinery as the
+// startup snapshot, just forced with reason "manual".
+ipcMain.handle("force-backup", async () => {
+  if (!config.dataPath) return { error: "no data folder configured" };
+  try {
+    const { path: dest, snapshot } = Backup.createBackup(
+      config.dataPath,
+      APP_VERSION,
+      "manual",
+      { backupDir: backupDirForData(config.dataPath) },
+    );
+    const counts = (snapshot && snapshot.counts) || {};
+    return {
+      ok: true,
+      path: dest,
+      reminders: counts.reminders ?? null,
+      history: counts.history ?? null,
+    };
+  } catch (err) {
+    console.error("force-backup failed:", err);
+    return { error: String((err && err.message) || err) };
+  }
+});
+
+// Step 1 of "Load from backup": let the user pick a backup file and PREVIEW how
+// many reminders it would add. Defaults to this data folder's backups folder so
+// the common case (your own latest snapshot) is one click away, but any shared
+// backup file can be chosen. The merge is computed dry — nothing is written yet.
+ipcMain.handle("choose-backup-to-load", async () => {
+  if (!config.dataPath) return { error: "no data folder configured" };
+  const dir = backupDirForData(config.dataPath);
+  const result = await dialog.showOpenDialog({
+    title: "Load reminders from a backup",
+    defaultPath: fs.existsSync(dir) ? dir : config.dataPath,
+    properties: ["openFile"],
+    filters: [
+      { name: "Reminder backup", extensions: ["json"] },
+      { name: "All files", extensions: ["*"] },
+    ],
+  });
+  if (result.canceled || !result.filePaths.length) return { canceled: true };
+  const file = result.filePaths[0];
+  try {
+    const env = Backup.loadBackup(file); // throws if it isn't a reminder backup
+    const preview = storage.mergeFromBackup(env.data, { dryRun: true });
+    return {
+      canceled: false,
+      path: file,
+      extra: preview.added,
+      extraActive: preview.addedActive,
+      extraHistory: preview.addedHistory,
+    };
+  } catch (err) {
+    console.error("choose-backup-to-load failed:", err);
+    return { error: String((err && err.message) || err) };
+  }
+});
+
+// Step 2 of "Load from backup": merge the chosen backup into the live data,
+// adding only reminders not already present (deduped by id, so this is safe to
+// repeat). Re-reads + re-validates the file by path; the merge re-dedups, so a
+// stale path or a file that changed since the preview can't corrupt the store.
+ipcMain.handle("load-backup", async (event, filePath) => {
+  if (!config.dataPath) return { error: "no data folder configured" };
+  if (typeof filePath !== "string" || !filePath) return { error: "no file" };
+  try {
+    const env = Backup.loadBackup(filePath);
+    const summary = storage.mergeFromBackup(env.data);
+    // storage.mergeFromBackup notifies the renderer on change; the renderer's
+    // handler also reloads — no extra notifyRefresh() needed here.
+    return { ok: true, ...summary };
+  } catch (err) {
+    console.error("load-backup failed:", err);
+    return { error: String((err && err.message) || err) };
   }
 });
 
@@ -1112,6 +1225,27 @@ app.whenReady().then(async () => {
       return;
     }
   }
+  // Capture child/renderer process crashes (the "Renderer process crashed" and
+  // GPU-process-gone events) into the log so they are diagnosable after the
+  // fact, not just visible in a terminal. console.error is teed to the file.
+  app.on("render-process-gone", (event, contents, details) => {
+    let url = "";
+    try {
+      url = contents.getURL();
+    } catch {
+      // a gone webContents may refuse getURL — the reason is the useful part
+    }
+    console.error(
+      `render-process-gone: reason=${details.reason} ` +
+        `exitCode=${details.exitCode} url=${url}`,
+    );
+  });
+  app.on("child-process-gone", (event, details) => {
+    console.error(
+      `child-process-gone: type=${details.type} reason=${details.reason} ` +
+        `exitCode=${details.exitCode}${details.name ? ` name=${details.name}` : ""}`,
+    );
+  });
   createTrayInstance();
   openMainWindow();
   applyLoginItemSetting();
