@@ -34,3 +34,17 @@ jobs:
         run: npm run build -- --publish always
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # Publish a second, version-LESS copy of the installer so there is always a
+      # stable download URL for the newest release:
+      #   https://github.com/dmoke/reminder/releases/latest/download/Reminders-Setup.exe
+      # The versioned Reminders-Setup-<version>.exe is still published too.
+      - name: Attach a stable "latest" installer alias
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem dist -Filter 'Reminders-Setup-*.exe' | Select-Object -First 1
+          if (-not $exe) { throw 'Installer Reminders-Setup-*.exe not found in dist/' }
+          Copy-Item $exe.FullName 'dist/Reminders-Setup.exe' -Force
+          gh release upload $env:GITHUB_REF_NAME 'dist/Reminders-Setup.exe' --clobber
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

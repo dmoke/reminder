@@ -4,9 +4,11 @@ Reminders is a Windows tray-based desktop reminders app built with Electron. It 
 
 ## Install (Windows)
 
-1. Go to the **[latest release](https://github.com/dmoke/reminder/releases/latest)**.
-2. Under **Assets**, download `Reminders-Setup-<version>.exe`.
-3. Run the installer (it installs for the current user — no administrator rights needed) and follow the prompts.
+1. Download the installer — either of these works:
+   - **Always newest:** [`Reminders-Setup.exe`](https://github.com/dmoke/reminder/releases/latest/download/Reminders-Setup.exe) — a permanent link that always serves the latest release.
+   - Or go to the **[latest release](https://github.com/dmoke/reminder/releases/latest)** and, under **Assets**, download the versioned `Reminders-Setup-<version>.exe`.
+2. Run the installer (it installs for the current user — no administrator rights needed) and follow the prompts.
+3. Installing over an existing version keeps your reminders and settings; your chosen data folder is never touched.
 
 > **SmartScreen note:** the app is not code-signed, so Windows may show a
 > "Windows protected your PC" prompt the first time you run the installer.
