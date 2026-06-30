@@ -17,6 +17,8 @@ const Backup = require("./backup");
 const Scheduler = require("./scheduler");
 const { createTray } = require("./tray");
 const { nextOccurrence, RECURRENCES } = require("./recurrence");
+const pichugin = require("./pichugin");
+const { collapseDecision, sanitizeReopenMinutes } = require("./alertState");
 
 // Read straight from the app's package.json so the version stamped into backups
 // is the real app version (and unambiguous in dev, where app.getVersion() can
@@ -27,6 +29,16 @@ const CSP =
   "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; media-src 'self' data:;";
 const DISMISS_SNOOZE_MS = 5 * 60 * 1000;
 const RAISE_THROTTLE_MS = 20 * 1000;
+// Collapsed "mini" alert: the native minimize button on the full alert shrinks
+// it to a tiny always-on-top rectangle (top-right, draggable) showing the
+// overdue count + how long ago it was collapsed. This lets the user postpone a
+// pile of overdues without losing track. While collapsed the alert never
+// auto-raises; the full alert returns when a NEW reminder fires or after the
+// configurable timeout (config.collapseReopenMinutes; 0 = never) elapses.
+const MINI_WIDTH = 208;
+const MINI_HEIGHT = 76;
+const MINI_MARGIN = 16; // gap kept from the work-area corner
+const DEFAULT_REOPEN_MIN = 20;
 // The main window auto-fits its height to the reminder list: it shrinks down to
 // roughly the page chrome when nearly empty and grows up to a per-display cap
 // (mainWindowMaxHeight, chosen on launch), after which the list scrolls
@@ -75,6 +87,13 @@ const ALERT_STRINGS = {
     "snooze-all": "Snooze all",
     "complete-all": "Complete all",
     recurring: "Repeats",
+    "overdue-label": "overdue",
+    "mini-open": "Open",
+    minimize: "Minimize",
+    "search-ph": "Search overdue…",
+    "sort-overdue": "Most overdue",
+    "sort-recent": "Least overdue",
+    "no-matches": "No matches",
   },
   uk: {
     title: "Нагадування",
@@ -96,6 +115,13 @@ const ALERT_STRINGS = {
     "snooze-all": "Відкласти всі",
     "complete-all": "Виконати всі",
     recurring: "Повторюється",
+    "overdue-label": "прострочено",
+    "mini-open": "Відкрити",
+    minimize: "Згорнути",
+    "search-ph": "Пошук прострочених…",
+    "sort-overdue": "Найбільш прострочені",
+    "sort-recent": "Найменш прострочені",
+    "no-matches": "Немає збігів",
   },
 };
 
@@ -128,6 +154,14 @@ let mainWindowMaxHeight = WIN_MAX_HEIGHT; // auto-fit growth cap (DIP) for this 
 let mainWindowDisplayId = null; // id of the display the window was last sized for
 let alertWindow = null;
 let alertReady = false;
+// Collapsed "mini" alert state. miniWindow is the tiny rectangle; alertCollapsed
+// is true while the full alert is minimized and the pill stands in for it;
+// collapsedSince is the epoch ms it was collapsed (drives the pill's elapsed
+// timer and the auto-reopen timeout).
+let miniWindow = null;
+let miniReady = false;
+let alertCollapsed = false;
+let collapsedSince = 0;
 let storage = null;
 let scheduler = null;
 let config = {};
@@ -149,6 +183,16 @@ function notifyRefresh() {
 
 function lang() {
   return config.language === "uk" ? "uk" : "en";
+}
+
+// How long a fully-collapsed alert waits before the full window auto-reopens, in
+// ms. 0 means never (only a brand-new reminder reopens it).
+function reopenMs() {
+  return (
+    sanitizeReopenMinutes(config.collapseReopenMinutes, DEFAULT_REOPEN_MIN) *
+    60 *
+    1000
+  );
 }
 
 // Where this data folder's backups live: a stable per-user app directory OUTSIDE
@@ -403,6 +447,14 @@ function ensureAlertWindow() {
   hardenWebContents(win);
   win.setAlwaysOnTop(true, "screen-saver");
   win.setVisibleOnAllWorkspaces(true);
+  // The native minimize button collapses the alert into the mini rectangle
+  // instead of sending it to the taskbar — the user's "postpone these overdues"
+  // gesture. (Fires only on a genuine minimize; we never minimize it ourselves.)
+  win.on("minimize", () => {
+    if (isQuitting) return;
+    if (alertWindow !== win) return;
+    collapseToMini();
+  });
   win.loadFile(path.join(__dirname, "..", "ui", "alert.html"));
   win.webContents.on("did-finish-load", () => {
     // Ignore a late load event from a window we have already replaced.
@@ -425,6 +477,14 @@ function ensureAlertWindow() {
     // unchanged key short-circuits sendAlertData() and the new window renders
     // empty.
     lastDueKey = "";
+    // If the full alert was destroyed while collapsed, tear down the collapse
+    // state too so the orphaned mini doesn't linger and the recreated window
+    // doesn't mistake the still-due set for brand-new reminders (spurious beep).
+    if (alertCollapsed) {
+      alertCollapsed = false;
+      collapsedSince = 0;
+      closeMiniWindow();
+    }
   });
 }
 
@@ -469,11 +529,129 @@ function closeAlertWindow() {
   alertReady = false;
 }
 
+// ---- Collapsed "mini" alert -----------------------------------------------
+
+// Park the mini rectangle in the top-right corner of the work area on the
+// display under the cursor (where the full alert lives). Re-applied on each
+// collapse; the user can drag it elsewhere afterward.
+function positionMini(win) {
+  const wa = targetDisplay().workArea;
+  win.setBounds({
+    x: Math.round(wa.x + wa.width - MINI_WIDTH - MINI_MARGIN),
+    y: Math.round(wa.y + MINI_MARGIN),
+    width: MINI_WIDTH,
+    height: MINI_HEIGHT,
+  });
+}
+
+function ensureMiniWindow() {
+  if (miniWindow && !miniWindow.isDestroyed()) return;
+  miniReady = false;
+  const win = new BrowserWindow({
+    width: MINI_WIDTH,
+    height: MINI_HEIGHT,
+    frame: false,
+    resizable: false,
+    minimizable: true, // the pill's own "minimize" button tucks it to the taskbar
+    maximizable: false,
+    fullscreenable: false,
+    skipTaskbar: true,
+    alwaysOnTop: true,
+    show: false,
+    backgroundColor: "#b91c1c",
+    icon: appIcon,
+    title: "Reminder",
+    autoHideMenuBar: true,
+    webPreferences: {
+      preload: path.join(__dirname, "preload.js"),
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  });
+  miniWindow = win;
+  hardenWebContents(win);
+  win.setAlwaysOnTop(true, "screen-saver");
+  win.setVisibleOnAllWorkspaces(true);
+  win.loadFile(path.join(__dirname, "..", "ui", "mini.html"));
+  win.webContents.on("did-finish-load", () => {
+    if (miniWindow !== win) return;
+    miniReady = true;
+    sendMiniData();
+    // Surface the pill only now that its content has painted, so the first
+    // collapse never flashes a contentless rectangle.
+    if (alertCollapsed) win.showInactive();
+  });
+  // The pill's "minimize" button tucks it to the taskbar; restore brings it back
+  // as a clean floating overlay (drop the taskbar button again).
+  win.on("restore", () => {
+    if (miniWindow !== win) return;
+    win.setSkipTaskbar(true);
+    win.setAlwaysOnTop(true, "screen-saver");
+  });
+  win.on("closed", () => {
+    if (miniWindow !== win) return;
+    miniWindow = null;
+    miniReady = false;
+  });
+}
+
+function sendMiniData() {
+  if (!miniWindow || miniWindow.isDestroyed() || !miniReady) return;
+  miniWindow.webContents.send("mini:data", {
+    count: currentDue.length,
+    collapsedSince,
+    lang: lang(),
+    strings: ALERT_STRINGS[lang()],
+  });
+}
+
+function closeMiniWindow() {
+  if (miniWindow && !miniWindow.isDestroyed()) miniWindow.close();
+  miniWindow = null;
+  miniReady = false;
+}
+
+// Collapse the full alert into the mini rectangle (triggered by the alert's
+// native minimize button — the window is already minimized at that point). Hide
+// it from the taskbar so only the pill represents it.
+function collapseToMini() {
+  if (alertCollapsed) return;
+  alertCollapsed = true;
+  collapsedSince = Date.now();
+  if (alertWindow && !alertWindow.isDestroyed()) {
+    alertWindow.setSkipTaskbar(true);
+  }
+  ensureMiniWindow();
+  positionMini(miniWindow);
+  miniWindow.setAlwaysOnTop(true, "screen-saver");
+  // Surface the pill without stealing focus — but only once its content is
+  // loaded; otherwise the did-finish-load handler shows it after the first paint.
+  if (miniReady) miniWindow.showInactive();
+  sendMiniData();
+}
+
+// Restore the full alert from the mini rectangle (user clicked expand, a new
+// reminder fired, or the collapse timeout elapsed). Caller re-sends the alert
+// payload + raises the window.
+function expandToFull() {
+  if (!alertCollapsed) return;
+  alertCollapsed = false;
+  collapsedSince = 0;
+  closeMiniWindow();
+  if (alertWindow && !alertWindow.isDestroyed()) {
+    alertWindow.setSkipTaskbar(false);
+    if (alertWindow.isMinimized()) alertWindow.restore();
+  }
+}
+
 // Called by the scheduler every second with the currently-due reminders.
 function handleDue(due) {
   currentDue = due;
   if (!due.length) {
     lastDueKey = "";
+    alertCollapsed = false;
+    collapsedSince = 0;
+    closeMiniWindow();
     closeAlertWindow();
     return;
   }
@@ -497,6 +675,25 @@ function pushAlert(due) {
     lastDueKey ? lastDueKey.split("|").map((s) => s.split("@")[0]) : [],
   );
   const gainedNew = [...ids].some((id) => !prevIds.has(id));
+
+  // Collapsed (mini) mode: never auto-raise — that's the whole point of
+  // postponing. Just keep the pill's count fresh, and only restore the full
+  // alert when a brand-new reminder appears or the collapse timeout elapses.
+  if (alertCollapsed) {
+    sendMiniData();
+    const decision = collapseDecision({
+      gainedNew,
+      collapsedSince,
+      now: Date.now(),
+      reopenMs: reopenMs(),
+    });
+    if (decision !== "reopen") {
+      lastDueKey = key; // track changes so a later new reminder is detected
+      return;
+    }
+    expandToFull();
+    lastDueKey = ""; // force a fresh render + raise in the full-mode block below
+  }
 
   if (key !== lastDueKey) {
     lastDueKey = key;
@@ -672,6 +869,10 @@ ipcMain.handle("get-config", () => ({
   dataPath: config.dataPath || "",
   openAtLogin: config.openAtLogin !== false,
   language: lang(),
+  collapseReopenMinutes: sanitizeReopenMinutes(
+    config.collapseReopenMinutes,
+    DEFAULT_REOPEN_MIN,
+  ),
 }));
 ipcMain.handle("set-language", (event, value) => {
   config.language = value === "uk" ? "uk" : "en";
@@ -685,6 +886,14 @@ ipcMain.handle("set-login-item", (event, enabled) => {
   Config.save(config);
   applyLoginItemSetting();
   return config.openAtLogin;
+});
+ipcMain.handle("set-collapse-reopen", (event, minutes) => {
+  config.collapseReopenMinutes = sanitizeReopenMinutes(
+    minutes,
+    DEFAULT_REOPEN_MIN,
+  );
+  Config.save(config);
+  return config.collapseReopenMinutes;
 });
 ipcMain.handle("choose-folder", async () => {
   const result = await dialog.showOpenDialog({
@@ -726,6 +935,54 @@ ipcMain.handle("open-backups-folder", async () => {
   await shell.openPath(target);
   return true;
 });
+// Import reminders from another app's export. Currently understands the
+// "Pichugin Organizer 3" database (db_*.podb) and its XML export (db_*.podb.xml).
+// Re-importing the same file is safe — storage de-dups by the source guid.
+ipcMain.handle("import-reminders", async () => {
+  const result = await dialog.showOpenDialog({
+    title: "Import reminders from Pichugin Organizer",
+    defaultPath: config.lastImportDir || app.getPath("desktop"),
+    properties: ["openFile"],
+    filters: [
+      { name: "Pichugin Organizer", extensions: ["podb", "xml"] },
+      { name: "All files", extensions: ["*"] },
+    ],
+  });
+  if (result.canceled || !result.filePaths.length) return { canceled: true };
+  const file = result.filePaths[0];
+  // Remember the folder so the next import opens in the same place.
+  config.lastImportDir = path.dirname(file);
+  Config.save(config);
+  try {
+    const records = pichugin.parse(fs.readFileSync(file));
+    const reminders = records.map((r) => {
+      const reminder = {
+        id: uuidv4(),
+        text: r.text,
+        time: r.time,
+        done: !!r.done,
+        emoji: "",
+        tags: [],
+        favorite: false,
+        recurrence: sanitizeRecurrence(r.recurrence),
+        createdAt: r.createdAt || new Date().toISOString(),
+        importSource: "pichugin",
+        importId: r.importKey, // de-dup key for re-imports (guid or content hash)
+      };
+      if (r.done) {
+        reminder.completedAt = r.completedAt || new Date().toISOString();
+      }
+      return reminder;
+    });
+    // storage.importReminders notifies the renderer on change; the renderer's
+    // import handler also reloads — no extra notifyRefresh() needed here.
+    const summary = storage.importReminders(reminders);
+    return { canceled: false, parsed: records.length, ...summary };
+  } catch (err) {
+    console.error("import-reminders failed:", err);
+    return { canceled: false, error: String((err && err.message) || err) };
+  }
+});
 
 // Alert-window actions
 ipcMain.handle("alert:complete", (event, id, expectedTime) =>
@@ -741,7 +998,41 @@ ipcMain.handle("alert:dismiss", () => {
   // user is reminded again shortly (constant reminding until resolved).
   const until = new Date(Date.now() + DISMISS_SNOOZE_MS).toISOString();
   currentDue.forEach((r) => storage.update(r.id, { time: until }));
+  alertCollapsed = false;
+  collapsedSince = 0;
+  closeMiniWindow();
   closeAlertWindow();
+  return true;
+});
+// Clicking the mini rectangle's expand control restores the full alert.
+ipcMain.handle("mini:expand", () => {
+  if (!alertCollapsed) return false;
+  expandToFull();
+  if (currentDue.length) {
+    ensureAlertWindow();
+    // Mark the current set as already-shown so the render below — and the next
+    // scheduler tick — treat this as a user-initiated restore (no beep/flash),
+    // not a brand-new reminder.
+    lastDueKey = currentDue
+      .map((r) => `${r.id}@${r.time}`)
+      .sort()
+      .join("|");
+    sendAlertData(currentDue, false);
+    // No focus/flashFrame — a user-initiated restore must not flash the taskbar
+    // (matches the timeout-reopen path). The window still comes to the top.
+    raiseAlert(false);
+  }
+  return true;
+});
+// The mini rectangle's minimize button tucks the pill to the Windows taskbar
+// (a taskbar button appears; clicking it restores the floating pill).
+ipcMain.handle("mini:minimize", () => {
+  if (!miniWindow || miniWindow.isDestroyed()) return false;
+  // Drop always-on-top first — an always-on-top window can refuse to minimize on
+  // some Windows versions. The "restore" handler re-asserts it on the way back.
+  miniWindow.setAlwaysOnTop(false);
+  miniWindow.setSkipTaskbar(false);
+  miniWindow.minimize();
   return true;
 });
 ipcMain.handle("alert:open-app", () => openMainWindow());

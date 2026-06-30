@@ -32,6 +32,7 @@ After installing, Reminders launches into the system tray and (by default) start
 - **Complete & delete** — mark reminders done (archived to history) or delete them outright.
 - **History management** — delete completed reminders by time range (last hour, today, last 7 days, all time).
 - **Choose data folder** — pick where reminders are stored, and open that folder from the app.
+- **Import from Pichugin Organizer** — bring in reminders from a [Pichugin Organizer 3](#importing-from-pichugin-organizer) database (`db_<name>.podb`) or its XML export (`db_<name>.podb.xml`) from **Settings → Import**. Completed tasks go to history, the rest become active reminders, and re-importing the same file skips duplicates.
 - **Language switch** — English or Українська (Ukrainian).
 - **Start with Windows** — optional login-item toggle so the app launches at startup (installed builds only).
 
@@ -144,6 +145,23 @@ the app and format versions that wrote it:
   problem after an update, sharing the backup file is enough to recover or
   diagnose your reminders.
 
+### Importing from Pichugin Organizer
+
+You can migrate reminders from **Pichugin Organizer 3** in **Settings → Import
+reminders → Import from Pichugin Organizer…**, then pick one of its data files:
+
+- `db_<name>.podb` — the live organizer database (always current).
+- `db_<name>.podb.xml` — a manual XML export from the organizer.
+
+Both are read directly (including their Windows‑1251 Cyrillic text — no manual
+conversion needed). Each task is mapped to a reminder: its scheduled date/time
+becomes the reminder time, completed tasks are added to your **history**, and the
+rest become **active** reminders. Imports are matched on the organizer's task id,
+so re-importing the same file (or importing both the `.podb` and its `.podb.xml`)
+never creates duplicates — already-imported tasks are skipped. A short summary
+(added / completed / skipped) is shown after each import. Repeat schedules are not
+carried over (imported reminders are one-off).
+
 ## Project structure
 
 ```
@@ -155,6 +173,7 @@ reminder/
 │   ├── scheduler.js     # 1s polling + due-reminder toast notifications
 │   ├── tray.js          # System tray icon and context menu
 │   ├── config.js        # Loads/saves config.json in userData
+│   ├── pichugin.js      # Parser/importer for Pichugin Organizer 3 (.podb / .podb.xml)
 │   ├── preload.js       # contextBridge API exposed to the renderer
 │   └── assets/          # App/tray icon
 ├── ui/                  # Renderer (UI)

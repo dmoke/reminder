@@ -21,8 +21,11 @@ contextBridge.exposeInMainWorld("electronAPI", {
   chooseFolder: () => ipcRenderer.invoke("choose-folder"),
   openFolder: () => ipcRenderer.invoke("open-folder"),
   openBackupsFolder: () => ipcRenderer.invoke("open-backups-folder"),
+  importReminders: () => ipcRenderer.invoke("import-reminders"),
   setLoginItem: (enabled) => ipcRenderer.invoke("set-login-item", enabled),
   setLanguage: (lang) => ipcRenderer.invoke("set-language", lang),
+  setCollapseReopen: (minutes) =>
+    ipcRenderer.invoke("set-collapse-reopen", minutes),
   onRefreshReminders: (callback) =>
     ipcRenderer.on("refresh-reminders", callback),
   onOpenAddModal: (callback) => ipcRenderer.on("open-add-modal", callback),
@@ -41,4 +44,12 @@ contextBridge.exposeInMainWorld("alertAPI", {
   edit: (id) => ipcRenderer.invoke("alert:edit", id),
   dismiss: () => ipcRenderer.invoke("alert:dismiss"),
   openApp: () => ipcRenderer.invoke("alert:open-app"),
+});
+
+// Collapsed "mini" alert window API
+contextBridge.exposeInMainWorld("miniAPI", {
+  onData: (callback) =>
+    ipcRenderer.on("mini:data", (event, data) => callback(data)),
+  expand: () => ipcRenderer.invoke("mini:expand"),
+  minimize: () => ipcRenderer.invoke("mini:minimize"),
 });

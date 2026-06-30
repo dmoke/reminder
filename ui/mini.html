@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline';"
+    />
+    <title>Reminder</title>
+    <link rel="stylesheet" href="mini.css" />
+  </head>
+  <body class="mini-body">
+    <div id="miniRoot" class="mini" title="">
+      <div class="mini-btns">
+        <button
+          type="button"
+          id="miniMinimize"
+          class="mini-btn"
+          title="Minimize"
+          aria-label="Minimize"
+        >
+          ▁
+        </button>
+        <button
+          type="button"
+          id="miniExpand"
+          class="mini-btn"
+          title="Open"
+          aria-label="Open"
+        >
+          ⤢
+        </button>
+      </div>
+      <div class="mini-main">
+        <span class="mini-bell">🔔</span>
+        <span id="miniCount" class="mini-count">0</span>
+        <span id="miniLabel" class="mini-label">overdue</span>
+      </div>
+      <div class="mini-time">
+        <span class="mini-clock">⏱</span>
+        <span id="miniElapsed" class="mini-elapsed">0m</span>
+      </div>
+    </div>
+    <script src="mini.js"></script>
+  </body>
+</html>

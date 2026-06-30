@@ -149,6 +149,13 @@
           <button id="histRecurBtn" class="filter-toggle" data-active="false">
             ⟳ Repeating
           </button>
+          <button
+            id="histBadgeBasisBtn"
+            class="filter-toggle"
+            title="Switch the recency badge between created and completed date"
+          >
+            🏷 Badge: Created
+          </button>
           <div class="view-toggle" role="group">
             <button
               class="view-toggle-btn active"
@@ -208,6 +215,22 @@
             it to restore your reminders.
           </p>
         </div>
+        <div class="storage-card storage-card--panel storage-card--stack">
+          <div class="storage-row">
+            <p id="importLabel">Import reminders:</p>
+            <button id="importBtn" class="secondary-btn">
+              Import from Pichugin Organizer…
+            </button>
+          </div>
+          <p id="importDesc" class="storage-subtext">
+            Bring in reminders from a Pichugin Organizer 3 database
+            (db_&lt;name&gt;.podb) or its XML export (db_&lt;name&gt;.podb.xml).
+            Completed tasks are added to your history; the rest become active
+            reminders. Re-importing the same file is safe — duplicates are
+            skipped.
+          </p>
+          <p id="importResult" class="storage-subtext import-result hidden"></p>
+        </div>
         <div class="language-card storage-card--panel">
           <p>Language:</p>
           <div class="language-buttons">
@@ -227,6 +250,25 @@
               <span class="switch-slider"></span>
             </label>
           </div>
+        </div>
+        <div class="storage-card storage-card--panel storage-card--stack">
+          <div class="storage-row">
+            <p id="collapseLabel">Reopen collapsed alert:</p>
+            <select id="collapseReopenSelect" class="filter-select">
+              <option value="5">After 5 minutes</option>
+              <option value="10">After 10 minutes</option>
+              <option value="20">After 20 minutes</option>
+              <option value="30">After 30 minutes</option>
+              <option value="60">After 1 hour</option>
+              <option value="0">Never</option>
+            </select>
+          </div>
+          <p id="collapseDesc" class="storage-subtext">
+            Minimizing an alert shrinks it to a small rectangle showing how many
+            reminders are overdue and how long ago you collapsed it. The full
+            alert returns when a new reminder comes due, or after this much time.
+            “Never” keeps it collapsed until a new reminder fires.
+          </p>
         </div>
       </section>
     </div>

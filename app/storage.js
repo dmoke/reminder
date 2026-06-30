@@ -131,6 +131,44 @@ class Storage {
     return changed || historyChanged;
   }
 
+  // Bulk-import reminders (e.g. from another app). Each item is added as-is, so
+  // the caller is responsible for shaping it like a reminder (id, text, time, …).
+  // Re-importing is safe: any item whose `importId` already exists — in either
+  // the active list or history — is skipped rather than duplicated, and the batch
+  // is de-duplicated against itself too. Completed items (done) go to history;
+  // the rest to the active list. Returns a summary of what happened.
+  importReminders(reminders) {
+    const list = Array.isArray(reminders) ? reminders : [];
+    const history = this.getHistory();
+    const seen = new Set();
+    for (const r of this.active) if (r.importId) seen.add(r.importId);
+    for (const r of history) if (r.importId) seen.add(r.importId);
+
+    let added = 0;
+    let completed = 0;
+    let skipped = 0;
+    for (const r of list) {
+      const key = r && r.importId;
+      if (key && seen.has(key)) {
+        skipped += 1;
+        continue;
+      }
+      if (key) seen.add(key);
+      if (r.done) {
+        history.unshift(r);
+        completed += 1;
+      } else {
+        this.active.push(r);
+        added += 1;
+      }
+    }
+
+    if (added) this.writeFile(this.activePath, this.active);
+    if (completed) this.writeFile(this.historyPath, history);
+    if (added || completed) this.notify();
+    return { added, completed, skipped, total: list.length };
+  }
+
   // Complete one occurrence of a recurring reminder: push a completed snapshot
   // to history AND advance the still-active reminder to its next occurrence.
   recurComplete(id, nextTime) {

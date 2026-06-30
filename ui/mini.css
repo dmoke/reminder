@@ -1,0 +1,127 @@
+/* ==========================================================================
+   Collapsed "mini" alert — a tiny always-on-top rectangle that stands in for
+   the full alert while the user postpones a pile of overdues. Shows the overdue
+   count + how long ago the alert was collapsed. The whole pill is draggable
+   (-webkit-app-region: drag); only the expand button opts out so it stays
+   clickable. Window is frameless + non-transparent: the .mini surface fills it
+   edge-to-edge, so the rectangle reads cleanly even without window transparency.
+   Mirrors the alert window's urgent red accent.
+   ========================================================================== */
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+}
+
+.mini-body {
+  /* Match the window backgroundColor so any sub-pixel gap blends in. */
+  background: #b91c1c;
+  overflow: hidden;
+  user-select: none;
+  cursor: default;
+}
+
+.mini {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
+  height: 100vh;
+  padding: 10px 14px;
+  color: #ffffff;
+  background: linear-gradient(135deg, #dc2626 0%, #991b1b 100%);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  /* The pill is the whole window's grab handle. */
+  -webkit-app-region: drag;
+  font-family:
+    "Segoe UI", system-ui, -apple-system, Roboto, Helvetica, Arial, sans-serif;
+}
+
+.mini-main {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  line-height: 1;
+}
+
+.mini-bell {
+  font-size: 1rem;
+  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.3));
+}
+
+.mini-count {
+  font-size: 1.5rem;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+}
+
+.mini-label {
+  font-size: 0.78rem;
+  font-weight: 600;
+  opacity: 0.92;
+  text-transform: lowercase;
+}
+
+.mini-time {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.76rem;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.mini-clock {
+  font-size: 0.8rem;
+}
+
+/* Control buttons: the only non-draggable region, parked in the top-right. */
+.mini-btns {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  display: flex;
+  gap: 4px;
+  -webkit-app-region: no-drag;
+}
+
+.mini-btn {
+  width: 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  font-size: 0.9rem;
+  line-height: 1;
+  color: #ffffff;
+  background: rgba(255, 255, 255, 0.16);
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: 8px;
+  cursor: pointer;
+  -webkit-app-region: no-drag;
+  transition:
+    background 0.12s ease,
+    transform 0.12s ease;
+}
+
+.mini-btn:hover {
+  background: rgba(255, 255, 255, 0.3);
+  transform: translateY(-1px);
+}
+
+.mini-btn:active {
+  transform: translateY(0);
+}
+
+/* The minimize glyph (▁) sits low in its em box; nudge it up to center. */
+#miniMinimize {
+  align-items: flex-start;
+  padding-top: 3px;
+}

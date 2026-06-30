@@ -16,6 +16,15 @@
   var currentStrings = {};
   var currentLang = "en";
 
+  // Toolbar state (persist across data updates).
+  var searchTerm = "";
+  // "overdue" = most overdue first (earliest due time); "recent" = least overdue.
+  var sortDir = "overdue";
+
+  // Built-once chrome elements (header/toolbar/list host/bulk host/footer), so a
+  // data update only re-renders the list and the search box keeps focus.
+  var chrome = null;
+
   // setInterval handle for the live "overdue by" refresh.
   var tickTimer = null;
 
@@ -214,26 +223,46 @@
     callApi(window.alertAPI.snooze(id, snoozeIso(kind, baseIso)));
   }
 
-  function completeAll() {
-    currentReminders.forEach(function (r) {
+  // Bulk actions operate on the currently-VISIBLE (filtered) set, so a search
+  // narrows what "Complete all" / "Snooze all" touch.
+  function completeAll(list) {
+    list.forEach(function (r) {
       if (r.id) completeReminder(r.id, r.time);
     });
   }
 
-  function snoozeAll(kind) {
+  function snoozeAll(kind, list) {
     var iso = null;
-    // snoozeAll convenience may exist; otherwise loop per id.
-    if (typeof window.alertAPI.snoozeAll === "function") {
-      callApi(window.alertAPI.snoozeAll(kind));
-      return;
-    }
-    currentReminders.forEach(function (r) {
+    list.forEach(function (r) {
       if (r.id) {
         // Recompute fresh per id so all land at ~the same +10m offset.
         if (iso === null) iso = snoozeIso(kind);
         callApi(window.alertAPI.snooze(r.id, iso));
       }
     });
+  }
+
+  // --- Filtering + sorting ---------------------------------------------------
+
+  function getVisible() {
+    var term = searchTerm.trim().toLowerCase();
+    var list = currentReminders.filter(function (r) {
+      if (!term) return true;
+      if (r.text && r.text.toLowerCase().indexOf(term) !== -1) return true;
+      for (var i = 0; i < r.tags.length; i++) {
+        if (String(r.tags[i]).toLowerCase().indexOf(term) !== -1) return true;
+      }
+      return false;
+    });
+    list.sort(function (a, b) {
+      var ta = new Date(a.time).getTime();
+      var tb = new Date(b.time).getTime();
+      if (isNaN(ta)) ta = 0;
+      if (isNaN(tb)) tb = 0;
+      // "overdue" = earliest due time first (most overdue at the top).
+      return sortDir === "overdue" ? ta - tb : tb - ta;
+    });
+    return list;
   }
 
   // --- Rendering -------------------------------------------------------------
@@ -325,50 +354,52 @@
     return row;
   }
 
-  function render() {
-    // Robust against repeated onData: fully clear then rebuild.
+  // Build the static chrome once. Returns an object of the live regions that
+  // render() updates on each data payload.
+  function buildChrome() {
     root.textContent = "";
 
-    var count = currentReminders.length;
-
-    // Header.
+    // Header: bell + title + count + minimize button.
     var header = el("div", "alert-header");
     header.appendChild(el("span", "alert-bell", "🔔"));
     var titleWrap = el("div", "alert-title-wrap");
-    titleWrap.appendChild(el("h1", "alert-title", s("title")));
-    titleWrap.appendChild(el("span", "alert-count", String(count)));
+    var titleEl = el("h1", "alert-title", s("title"));
+    var countEl = el("span", "alert-count", "0");
+    titleWrap.appendChild(titleEl);
+    titleWrap.appendChild(countEl);
     header.appendChild(titleWrap);
     root.appendChild(header);
 
-    // Rows.
-    var list = el("div", "alert-list");
-    currentReminders.forEach(function (r) {
-      list.appendChild(buildRow(r));
+    // Toolbar: search box + sort toggle.
+    var toolbar = el("div", "alert-toolbar");
+    var search = document.createElement("input");
+    search.type = "text";
+    search.className = "alert-search";
+    search.placeholder = s("search-ph");
+    search.value = searchTerm;
+    search.addEventListener("input", function () {
+      searchTerm = search.value;
+      renderList();
     });
-    root.appendChild(list);
+    toolbar.appendChild(search);
 
-    // Bulk actions when more than one due reminder.
-    if (count > 1) {
-      var bulk = el("div", "alert-bulk");
-      var completeAllBtn = el("button", "alert-btn alert-btn-complete", s("complete-all"));
-      completeAllBtn.type = "button";
-      completeAllBtn.addEventListener("click", completeAll);
-      bulk.appendChild(completeAllBtn);
+    var sortBtn = el("button", "alert-sort-btn");
+    sortBtn.type = "button";
+    sortBtn.addEventListener("click", function () {
+      sortDir = sortDir === "overdue" ? "recent" : "overdue";
+      applySortLabel();
+      renderList();
+    });
+    toolbar.appendChild(sortBtn);
+    root.appendChild(toolbar);
 
-      var snoozeAllBtn = el(
-        "button",
-        "alert-btn alert-btn-snooze",
-        s("snooze-all") + " (" + s("snooze-10m") + ")"
-      );
-      snoozeAllBtn.type = "button";
-      snoozeAllBtn.addEventListener("click", function () {
-        snoozeAll("10m");
-      });
-      bulk.appendChild(snoozeAllBtn);
-      root.appendChild(bulk);
-    }
+    // List host + bulk host (re-rendered each payload).
+    var listHost = el("div", "alert-list");
+    root.appendChild(listHost);
+    var bulkHost = el("div", "alert-bulk-host");
+    root.appendChild(bulkHost);
 
-    // Footer: Open app + Dismiss.
+    // Footer: Open app + Dismiss (static).
     var footer = el("div", "alert-footer");
     var openBtn = el("button", "alert-btn alert-btn-open", s("open-app"));
     openBtn.type = "button";
@@ -380,7 +411,6 @@
       }
     });
     footer.appendChild(openBtn);
-
     var dismissBtn = el("button", "alert-btn alert-btn-dismiss", s("dismiss"));
     dismissBtn.type = "button";
     dismissBtn.addEventListener("click", function () {
@@ -392,6 +422,81 @@
     });
     footer.appendChild(dismissBtn);
     root.appendChild(footer);
+
+    chrome = {
+      title: titleEl,
+      count: countEl,
+      search: search,
+      sortBtn: sortBtn,
+      listHost: listHost,
+      bulkHost: bulkHost,
+      openBtn: openBtn,
+      dismissBtn: dismissBtn
+    };
+    applySortLabel();
+  }
+
+  function applySortLabel() {
+    if (!chrome) return;
+    var key = sortDir === "overdue" ? "sort-overdue" : "sort-recent";
+    chrome.sortBtn.textContent = "⇅ " + s(key);
+  }
+
+  // Refresh the localized text on the static chrome (called on each payload so a
+  // language switch updates it without rebuilding the whole window).
+  function applyChromeStrings() {
+    if (!chrome) return;
+    chrome.title.textContent = s("title");
+    chrome.search.placeholder = s("search-ph");
+    chrome.openBtn.textContent = s("open-app");
+    chrome.dismissBtn.textContent = s("dismiss");
+    applySortLabel();
+  }
+
+  // Render just the list + bulk actions from the current filter/sort.
+  function renderList() {
+    if (!chrome) return;
+    var visible = getVisible();
+    chrome.count.textContent = String(currentReminders.length);
+
+    chrome.listHost.textContent = "";
+    if (visible.length === 0) {
+      chrome.listHost.appendChild(el("div", "alert-empty", s("no-matches")));
+    } else {
+      visible.forEach(function (r) {
+        chrome.listHost.appendChild(buildRow(r));
+      });
+    }
+
+    // Bulk actions when more than one reminder is visible.
+    chrome.bulkHost.textContent = "";
+    if (visible.length > 1) {
+      var bulk = el("div", "alert-bulk");
+      var completeAllBtn = el("button", "alert-btn alert-btn-complete", s("complete-all"));
+      completeAllBtn.type = "button";
+      completeAllBtn.addEventListener("click", function () {
+        completeAll(visible);
+      });
+      bulk.appendChild(completeAllBtn);
+
+      var snoozeAllBtn = el(
+        "button",
+        "alert-btn alert-btn-snooze",
+        s("snooze-all") + " (" + s("snooze-10m") + ")"
+      );
+      snoozeAllBtn.type = "button";
+      snoozeAllBtn.addEventListener("click", function () {
+        snoozeAll("10m", visible);
+      });
+      bulk.appendChild(snoozeAllBtn);
+      chrome.bulkHost.appendChild(bulk);
+    }
+  }
+
+  function render() {
+    if (!chrome) buildChrome();
+    applyChromeStrings();
+    renderList();
   }
 
   // Refresh only the relative-time text in place (no full re-render).

@@ -362,6 +362,44 @@ h1 {
   color: #475569;
 }
 
+/* Completed-tab recency buckets (past direction) — same warm→cool hues as the
+   Upcoming buckets. Placed after .card.priority-low so the border-left wins. */
+.card.pbucket-today {
+  border-left: 5px solid #f59e0b;
+}
+.card.pbucket-lastweek {
+  border-left: 5px solid #22c55e;
+}
+.card.pbucket-lastmonth {
+  border-left: 5px solid #3b82f6;
+}
+.card.pbucket-thisyear {
+  border-left: 5px solid #8b5cf6;
+}
+.card.pbucket-earlier {
+  border-left: 5px solid #94a3b8;
+}
+.badge.pbucket-today {
+  background: rgba(245, 158, 11, 0.16);
+  color: #b45309;
+}
+.badge.pbucket-lastweek {
+  background: rgba(34, 197, 94, 0.14);
+  color: #166534;
+}
+.badge.pbucket-lastmonth {
+  background: rgba(59, 130, 246, 0.14);
+  color: #1d4ed8;
+}
+.badge.pbucket-thisyear {
+  background: rgba(139, 92, 246, 0.14);
+  color: #6d28d9;
+}
+.badge.pbucket-earlier {
+  background: rgba(148, 163, 184, 0.18);
+  color: #475569;
+}
+
 .button-group {
   display: flex;
   gap: 10px;
@@ -488,6 +526,16 @@ button,
   color: #64748b;
   font-size: 0.85rem;
   line-height: 1.5;
+}
+
+/* Result line shown after an import: success green, error red. */
+.import-result {
+  margin-top: 4px;
+  font-weight: 600;
+  color: #15803d;
+}
+.import-result.import-error {
+  color: #b91c1c;
 }
 
 .storage-row {

@@ -10,12 +10,14 @@ if (!electronAPI) {
     chooseFolder: async () => null,
     openFolder: async () => false,
     openBackupsFolder: async () => false,
+    importReminders: async () => ({ canceled: true }),
     addReminder: async () => {},
     updateReminder: async () => {},
     archiveReminder: async () => {},
     deleteReminder: async () => {},
     setLoginItem: async () => true,
     setLanguage: async () => "en",
+    setCollapseReopen: async () => 20,
     onRefreshReminders: () => {},
     onOpenAddModal: () => {},
     onOpenEditModal: () => {},
@@ -48,6 +50,8 @@ let calTagValue = "";
 let histFav = false;
 let histRecur = false;
 let histTagValue = "";
+// Which date the Completed-tab recency badge buckets by: "created" | "completed".
+let historyBadgeBasis = localStorage.getItem("histBadgeBasis") || "created";
 // Completed-tab multi-select: ids ticked for deletion + the currently rendered
 // (filtered + sorted) history list, so "Select all" knows what's on screen.
 const historySelection = new Set();
@@ -363,6 +367,47 @@ function timeBucket(date, now) {
   return "later";
 }
 
+// Past-direction recency bucket for the Completed tab (mirrors timeBucket, but
+// looking backwards). Rolling windows ending now, closer = warmer.
+// Returns: "today" | "lastweek" | "lastmonth" | "thisyear" | "earlier".
+function pastBucket(date, now) {
+  const startOfToday = new Date(now);
+  startOfToday.setHours(0, 0, 0, 0);
+  if (date >= startOfToday) return "today";
+  const weekAgo = new Date(now);
+  weekAgo.setDate(weekAgo.getDate() - 7);
+  if (date >= weekAgo) return "lastweek";
+  const monthAgo = new Date(now);
+  monthAgo.setDate(monthAgo.getDate() - 30);
+  if (date >= monthAgo) return "lastmonth";
+  const startOfYear = new Date(now.getFullYear(), 0, 1);
+  if (date >= startOfYear) return "thisyear";
+  return "earlier";
+}
+
+// The timestamp the Completed-tab recency badge buckets by, honoring the basis
+// toggle and falling back gracefully when the preferred timestamp is missing.
+function historyBasisDate(reminder) {
+  const created = reminder.createdAt ? new Date(reminder.createdAt) : null;
+  const completed = reminder.completedAt ? new Date(reminder.completedAt) : null;
+  const valid = (d) => d && !isNaN(d.getTime());
+  const pick =
+    historyBadgeBasis === "completed"
+      ? (valid(completed) ? completed : created)
+      : (valid(created) ? created : completed);
+  if (valid(pick)) return pick;
+  const fallback = new Date(reminder.time);
+  return isNaN(fallback.getTime()) ? new Date() : fallback;
+}
+
+// Reflect the current badge basis on the Completed-tab toggle button.
+function updateHistBadgeBasisBtn() {
+  const btn = document.getElementById("histBadgeBasisBtn");
+  if (!btn) return;
+  btn.textContent = `🏷 ${t("hist-badge-prefix")} ${t("hist-basis-" + historyBadgeBasis)}`;
+  btn.title = t("hist-badge-title");
+}
+
 // ---- sorting ---------------------------------------------------------------
 
 // Comparator for the sortable list headers. "due" orders by reminder time,
@@ -495,10 +540,34 @@ const translations = {
       "survives the data folder being moved or deleted. Share it to restore your " +
       "reminders.",
     "open-backups-btn": "Open backups folder",
+    "import-label": "Import reminders:",
+    "import-btn": "Import from Pichugin Organizer…",
+    "import-desc":
+      "Bring in reminders from a Pichugin Organizer 3 database " +
+      "(db_<name>.podb) or its XML export (db_<name>.podb.xml). Completed tasks " +
+      "are added to your history; the rest become active reminders. Re-importing " +
+      "the same file is safe — duplicates are skipped.",
+    "import-summary":
+      "Imported {added} active and {completed} completed ({skipped} skipped).",
+    "import-none": "Nothing new to import — {skipped} already present.",
+    "import-empty": "No reminders found in that file.",
+    "import-failed": "Import failed: {error}",
     "language-label": "Language:",
     "lang-en": "English",
     "lang-uk": "Українська",
     "startup-label": "Start with Windows:",
+    "collapse-label": "Reopen collapsed alert:",
+    "collapse-desc":
+      "Minimizing an alert shrinks it to a small rectangle showing how many " +
+      "reminders are overdue and how long ago you collapsed it. The full alert " +
+      "returns when a new reminder comes due, or after this much time. " +
+      "“Never” keeps it collapsed until a new reminder fires.",
+    "reopen-5": "After 5 minutes",
+    "reopen-10": "After 10 minutes",
+    "reopen-20": "After 20 minutes",
+    "reopen-30": "After 30 minutes",
+    "reopen-60": "After 1 hour",
+    "reopen-0": "Never",
     "card-due-now": "Due now",
     "card-due-prefix": "Due",
     "card-remains-prefix": "in",
@@ -511,6 +580,15 @@ const translations = {
     "bucket-month": "This month",
     "bucket-year": "This year",
     "bucket-later": "Later",
+    "pbucket-today": "Today",
+    "pbucket-lastweek": "Last week",
+    "pbucket-lastmonth": "Last month",
+    "pbucket-thisyear": "This year",
+    "pbucket-earlier": "Earlier",
+    "hist-badge-prefix": "Badge:",
+    "hist-basis-created": "Created",
+    "hist-basis-completed": "Completed",
+    "hist-badge-title": "Switch the recency badge between created and completed date",
     "card-created-prefix": "Created",
     "card-btn-edit": "Edit",
     "card-btn-complete": "Complete",
@@ -643,10 +721,34 @@ const translations = {
       "вашою папкою з даними, тож не втрачається, якщо ту папку перемістити чи " +
       "видалити. Поділіться ним, щоб відновити нагадування.",
     "open-backups-btn": "Відкрити папку резервних копій",
+    "import-label": "Імпорт нагадувань:",
+    "import-btn": "Імпортувати з Pichugin Organizer…",
+    "import-desc":
+      "Перенесіть нагадування з бази Pichugin Organizer 3 " +
+      "(db_<назва>.podb) або її XML-експорту (db_<назва>.podb.xml). Завершені " +
+      "завдання потраплять до історії, решта стане активними нагадуваннями. " +
+      "Повторний імпорт того самого файлу безпечний — дублікати пропускаються.",
+    "import-summary":
+      "Імпортовано: {added} активних і {completed} завершених ({skipped} пропущено).",
+    "import-none": "Немає нового для імпорту — {skipped} вже наявні.",
+    "import-empty": "У цьому файлі не знайдено нагадувань.",
+    "import-failed": "Помилка імпорту: {error}",
     "language-label": "Мова:",
     "lang-en": "English",
     "lang-uk": "Українська",
     "startup-label": "Запускати разом із Windows:",
+    "collapse-label": "Повертати згорнуте сповіщення:",
+    "collapse-desc":
+      "Згортання сповіщення стискає його до невеликого прямокутника, який " +
+      "показує, скільки нагадувань прострочено та як давно ви його згорнули. " +
+      "Повне сповіщення повертається, коли настає нове нагадування, або через " +
+      "цей час. «Ніколи» залишає його згорнутим, доки не настане нове нагадування.",
+    "reopen-5": "Через 5 хвилин",
+    "reopen-10": "Через 10 хвилин",
+    "reopen-20": "Через 20 хвилин",
+    "reopen-30": "Через 30 хвилин",
+    "reopen-60": "Через 1 годину",
+    "reopen-0": "Ніколи",
     "card-due-now": "Час настав",
     "card-due-prefix": "Настане",
     "card-remains-prefix": "через",
@@ -659,6 +761,15 @@ const translations = {
     "bucket-month": "Цього місяця",
     "bucket-year": "Цього року",
     "bucket-later": "Пізніше",
+    "pbucket-today": "Сьогодні",
+    "pbucket-lastweek": "Минулого тижня",
+    "pbucket-lastmonth": "Минулого місяця",
+    "pbucket-thisyear": "Цього року",
+    "pbucket-earlier": "Раніше",
+    "hist-badge-prefix": "Бейдж:",
+    "hist-basis-created": "Створено",
+    "hist-basis-completed": "Завершено",
+    "hist-badge-title": "Перемикати бейдж між датою створення та завершення",
     "card-created-prefix": "Створено",
     "card-btn-edit": "Редагувати",
     "card-btn-complete": "Виконати",
@@ -843,8 +954,13 @@ function createCard(reminder, isHistory) {
   const badge = document.createElement("span");
   badge.className = "badge";
   if (isHistory) {
-    badge.classList.add("completed");
-    badge.textContent = t("card-badge-completed");
+    // Past-direction recency bucket for the chosen basis (created vs completed
+    // date) — drives the badge label and the card's left-border color, mirroring
+    // the Upcoming view but looking backwards.
+    const bucket = pastBucket(historyBasisDate(reminder), now);
+    badge.classList.add("pbucket-" + bucket);
+    badge.textContent = t("pbucket-" + bucket);
+    card.classList.add("pbucket-" + bucket);
   } else {
     // Relative bucket — drives both the badge and the card's left-border color.
     const bucket = timeBucket(reminderTime, now);
@@ -1312,6 +1428,14 @@ async function loadConfig() {
   if (dataPathEl) dataPathEl.textContent = config.dataPath || t("storage-not-set");
   const loginToggle = document.getElementById("loginToggle");
   if (loginToggle) loginToggle.checked = config.openAtLogin !== false;
+  const collapseSelect = document.getElementById("collapseReopenSelect");
+  if (collapseSelect) {
+    const minutes =
+      config.collapseReopenMinutes === undefined
+        ? 20
+        : config.collapseReopenMinutes;
+    collapseSelect.value = String(minutes);
+  }
 }
 
 async function renderCalendar() {
@@ -1961,6 +2085,7 @@ function updateAllTranslations() {
   if (histFavBtn) histFavBtn.textContent = t("filter-favorites");
   const histRecurBtn = document.getElementById("histRecurBtn");
   if (histRecurBtn) histRecurBtn.textContent = t("filter-repeating");
+  updateHistBadgeBasisBtn();
 
   // Sortable column headers (re-render so their labels follow the language)
   renderSortHeader("activeSortHeader", activeSort, loadActiveFiltered);
@@ -2021,6 +2146,12 @@ function updateAllTranslations() {
   if (backupDesc) backupDesc.textContent = t("backup-desc");
   const openBackupsBtn = document.getElementById("openBackupsBtn");
   if (openBackupsBtn) openBackupsBtn.textContent = t("open-backups-btn");
+  const importLabel = document.getElementById("importLabel");
+  if (importLabel) importLabel.textContent = t("import-label");
+  const importBtn = document.getElementById("importBtn");
+  if (importBtn) importBtn.textContent = t("import-btn");
+  const importDesc = document.getElementById("importDesc");
+  if (importDesc) importDesc.textContent = t("import-desc");
   set(".language-card p", t("language-label"));
   document.querySelectorAll(".lang-btn").forEach((btn) => {
     if (btn.dataset.lang === "en") btn.textContent = t("lang-en");
@@ -2028,6 +2159,18 @@ function updateAllTranslations() {
   });
   const startupLabel = document.getElementById("startupLabel");
   if (startupLabel) startupLabel.textContent = t("startup-label");
+  const collapseLabel = document.getElementById("collapseLabel");
+  if (collapseLabel) collapseLabel.textContent = t("collapse-label");
+  const collapseDesc = document.getElementById("collapseDesc");
+  if (collapseDesc) collapseDesc.textContent = t("collapse-desc");
+  setOptionText("collapseReopenSelect", {
+    "5": "reopen-5",
+    "10": "reopen-10",
+    "20": "reopen-20",
+    "30": "reopen-30",
+    "60": "reopen-60",
+    "0": "reopen-0",
+  });
 
   // Modal labels
   set("#modalTextLabel", t("modal-text-label"));
@@ -2154,6 +2297,12 @@ document.getElementById("histRecurBtn")?.addEventListener("click", (e) => {
   e.currentTarget.dataset.active = histRecur ? "true" : "false";
   loadHistoryFiltered();
 });
+document.getElementById("histBadgeBasisBtn")?.addEventListener("click", () => {
+  historyBadgeBasis = historyBadgeBasis === "created" ? "completed" : "created";
+  localStorage.setItem("histBadgeBasis", historyBadgeBasis);
+  updateHistBadgeBasisBtn();
+  loadHistoryFiltered();
+});
 // View toggles live on both the active and completed panels; they share viewMode.
 document.querySelectorAll(".view-toggle-btn").forEach((btn) => {
   btn.addEventListener("click", () => {
@@ -2246,6 +2395,14 @@ document.querySelectorAll(".lang-btn").forEach((btn) => {
     localStorage.setItem("language", currentLang);
     electronAPI.setLanguage(currentLang);
     updateAllTranslations();
+    // The import result is a baked-in, already-substituted sentence in the old
+    // language and can't be re-rendered from a key — clear it instead of leaving
+    // it stale next to the freshly re-translated card.
+    const importResultEl = document.getElementById("importResult");
+    if (importResultEl) {
+      importResultEl.textContent = "";
+      importResultEl.classList.add("hidden");
+    }
     reload();
   });
 });
@@ -2266,6 +2423,17 @@ document.getElementById("loginToggle")?.addEventListener("change", async (e) => 
     console.error("setLoginItem failed", err);
   }
 });
+
+// Collapsed-alert auto-reopen timeout
+document
+  .getElementById("collapseReopenSelect")
+  ?.addEventListener("change", async (e) => {
+    try {
+      await electronAPI.setCollapseReopen(parseInt(e.target.value, 10));
+    } catch (err) {
+      console.error("setCollapseReopen failed", err);
+    }
+  });
 
 // Nav
 viewButtons.forEach((button) => {
@@ -2409,6 +2577,55 @@ document.getElementById("openBackupsBtn")?.addEventListener("click", async () =>
     await electronAPI.openBackupsFolder();
   } catch (err) {
     console.error("openBackupsFolder failed", err);
+  }
+});
+
+function showImportResult(message, isError) {
+  const el = document.getElementById("importResult");
+  if (!el) return;
+  el.textContent = message;
+  el.classList.remove("hidden");
+  el.classList.toggle("import-error", !!isError);
+}
+
+document.getElementById("importBtn")?.addEventListener("click", async () => {
+  const btn = document.getElementById("importBtn");
+  if (btn) btn.disabled = true;
+  try {
+    const res = (await electronAPI.importReminders()) || {};
+    if (res.canceled) return; // user dismissed the file dialog — say nothing
+    if (res.error) {
+      showImportResult(t("import-failed").replace("{error}", res.error), true);
+      return;
+    }
+    const added = res.added || 0;
+    const completed = res.completed || 0;
+    const skipped = res.skipped || 0;
+    if (added + completed === 0) {
+      showImportResult(
+        (res.parsed || 0) === 0
+          ? t("import-empty")
+          : t("import-none").replace("{skipped}", skipped),
+        false,
+      );
+    } else {
+      showImportResult(
+        t("import-summary")
+          .replace("{added}", added)
+          .replace("{completed}", completed)
+          .replace("{skipped}", skipped),
+        false,
+      );
+    }
+    reload(); // surface the newly imported reminders
+  } catch (err) {
+    console.error("importReminders failed", err);
+    showImportResult(
+      t("import-failed").replace("{error}", String((err && err.message) || err)),
+      true,
+    );
+  } finally {
+    if (btn) btn.disabled = false;
   }
 });
 
