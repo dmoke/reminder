@@ -144,50 +144,9 @@
   // --- Snooze target computation --------------------------------------------
 
   function snoozeIso(kind, baseIso) {
-    var now = new Date();
-    if (kind === "10m") {
-      now.setMinutes(now.getMinutes() + 10);
-      return now.toISOString();
-    }
-    if (kind === "1h") {
-      now.setHours(now.getHours() + 1);
-      return now.toISOString();
-    }
-    if (kind === "3h") {
-      now.setHours(now.getHours() + 3);
-      return now.toISOString();
-    }
-    if (kind === "tomorrow") {
-      // Tomorrow at the reminder's own time-of-day ("same time").
-      var src = baseIso ? new Date(baseIso) : null;
-      now.setDate(now.getDate() + 1);
-      if (src && !isNaN(src.getTime())) {
-        now.setHours(src.getHours(), src.getMinutes(), 0, 0);
-      } else {
-        now.setHours(9, 0, 0, 0);
-      }
-      return now.toISOString();
-    }
-    if (kind === "2d" || kind === "1w") {
-      // Day-based: preserve the reminder's own time-of-day when available.
-      var srcDay = baseIso ? new Date(baseIso) : null;
-      now.setDate(now.getDate() + (kind === "1w" ? 7 : 2));
-      if (srcDay && !isNaN(srcDay.getTime())) {
-        now.setHours(srcDay.getHours(), srcDay.getMinutes(), 0, 0);
-      }
-      return now.toISOString();
-    }
-    if (kind === "1mo") {
-      now.setMonth(now.getMonth() + 1);
-      return now.toISOString();
-    }
-    if (kind === "1y") {
-      now.setFullYear(now.getFullYear() + 1);
-      return now.toISOString();
-    }
-    // Fallback: 10 minutes.
-    now.setMinutes(now.getMinutes() + 10);
-    return now.toISOString();
+    // Presets and date math live in ui/snooze.js so this window and the main
+    // window cannot drift apart (and so the math is unit-testable).
+    return window.ReminderSnooze.alertIso(kind, baseIso);
   }
 
   // --- Audio attention cue ---------------------------------------------------
@@ -326,16 +285,9 @@
     var wrap = el("div", "alert-snooze");
     wrap.appendChild(el("span", "alert-snooze-label", s("snooze")));
 
-    var options = [
-      { kind: "10m", label: s("snooze-10m") },
-      { kind: "1h", label: s("snooze-1h") },
-      { kind: "3h", label: s("snooze-3h") },
-      { kind: "tomorrow", label: s("snooze-tomorrow") },
-      { kind: "2d", label: s("snooze-2d") },
-      { kind: "1w", label: s("snooze-1w") },
-      { kind: "1mo", label: s("snooze-1mo") },
-      { kind: "1y", label: s("snooze-1y") }
-    ];
+    var options = window.ReminderSnooze.ALERT_KINDS.map(function (kind) {
+      return { kind: kind, label: s("snooze-" + kind) };
+    });
 
     options.forEach(function (opt) {
       var btn = el("button", "alert-btn alert-btn-snooze", opt.label);
@@ -354,7 +306,7 @@
     if (typeof window.alertAPI.edit === "function") {
       var customBtn = el(
         "button",
-        "alert-btn alert-btn-snooze alert-btn-custom",
+        "alert-btn alert-btn-custom",
         s("snooze-custom"),
       );
       customBtn.type = "button";

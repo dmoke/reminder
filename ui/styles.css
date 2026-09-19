@@ -1015,6 +1015,31 @@ select {
   font-size: 0.85rem;
 }
 
+/* Pick-my-own-time chip: the standout in the snooze row, because it is the
+   only option that is not a fixed preset. Three classes deliberately — it has
+   to outrank the compact-card overrides (.card .card-action, .card
+   .snooze-chip) further down, which would otherwise shrink it back to chip
+   size. Flat colors so .card-action's background transition still animates. */
+.card-action.snooze-chip.snooze-chip-custom {
+  padding: 9px 16px;
+  font-size: 0.88rem;
+  font-weight: 700;
+  border-radius: 12px;
+  color: #ffffff;
+  background: #1d4ed8;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.18),
+    0 8px 18px rgba(29, 78, 216, 0.24);
+}
+
+.card-action.snooze-chip.snooze-chip-custom:hover {
+  background: #1e40af;
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.18),
+    0 12px 24px rgba(29, 78, 216, 0.3);
+}
+
 .card-action.armed {
   background: #dc2626;
   color: #ffffff;

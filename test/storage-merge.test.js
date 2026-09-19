@@ -168,3 +168,56 @@ test("mergeFromBackup coexists with existing reminders", (t) => {
   assert.ok(store.getActive().some((r) => r.id === "pre"));
   assert.ok(store.getActive().some((r) => r.id === "1"));
 });
+
+// The end-to-end recovery drill for "the update ate my reminders": take a real
+// snapshot with the backup engine, lose the data, then get it all back through
+// the path the Settings panel actually uses (Load from backup… -> mergeFromBackup).
+test("a real backup snapshot restores an emptied data folder", (t) => {
+  const Backup = require("../app/backup.js");
+  const dir = tempDir(t);
+  const store = tempDir(t);
+
+  const active = [reminder("a"), reminder("b"), reminder("c")];
+  const history = [reminder("h1", { done: true })];
+  fs.writeFileSync(path.join(dir, "reminders.json"), JSON.stringify(active));
+  fs.writeFileSync(path.join(dir, "history.json"), JSON.stringify(history));
+
+  const { snapshot } = Backup.createBackup(dir, "1.3.0", "version-change", {
+    backupDir: store,
+  });
+
+  // Everything is gone.
+  fs.writeFileSync(path.join(dir, "reminders.json"), "[]");
+  fs.writeFileSync(path.join(dir, "history.json"), "[]");
+
+  const storage = new Storage(dir, () => {});
+  const summary = storage.mergeFromBackup(snapshot.data);
+
+  assert.equal(summary.added, 4);
+  assert.equal(summary.skipped, 0);
+  assert.deepEqual(storage.getActive(), active);
+  assert.deepEqual(storage.getHistory(), history);
+});
+
+test("restoring a backup never overwrites a reminder edited since it was taken", (t) => {
+  const Backup = require("../app/backup.js");
+  const dir = tempDir(t);
+  const store = tempDir(t);
+
+  fs.writeFileSync(
+    path.join(dir, "reminders.json"),
+    JSON.stringify([reminder("a", { text: "original" })]),
+  );
+  fs.writeFileSync(path.join(dir, "history.json"), "[]");
+  const { snapshot } = Backup.createBackup(dir, "1.3.0", "manual", {
+    backupDir: store,
+  });
+
+  const storage = new Storage(dir, () => {});
+  storage.update("a", { text: "edited after the backup" });
+
+  const summary = storage.mergeFromBackup(snapshot.data);
+  assert.equal(summary.added, 0);
+  assert.equal(summary.skipped, 1);
+  assert.equal(storage.getActive()[0].text, "edited after the backup");
+});

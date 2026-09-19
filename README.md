@@ -29,7 +29,7 @@ After installing, Reminders launches into the system tray and (by default) start
 - **Add reminders** — enter reminder text and pick a date/time (year, month, day, hour, minute) with a dropdown-assisted picker, plus a **Now** shortcut.
 - **Organized views** — see counts and lists for **Upcoming**, **Overdue**, and **Completed** reminders.
 - **Search** — filter active and completed reminders by text.
-- **Snooze** — postpone an active reminder by 10 minutes, 1 day, 2 days, 1 week, or 1 month.
+- **Snooze** — postpone an active reminder by 10 minutes, 30 minutes, 5 hours, 1 day, 2 days, 1 week, 1 month, or tomorrow at the same time. The alert window adds 1 hour, 3 hours and 1 year. **Pick my own time…** opens the editor for any other time.
 - **Reschedule / edit** — change a reminder's text or time.
 - **Complete & delete** — mark reminders done (archived to history) or delete them outright.
 - **History management** — delete completed reminders by time range (last hour, today, last 7 days, all time).
@@ -137,10 +137,12 @@ the app and format versions that wrote it:
   that pre-update snapshot, `appVersion` is the new build that wrote the file
   while `dataVersion` is the older version the data still belongs to.) A
   partially-broken file is preserved verbatim rather than discarded.
-- **Rotation** — only the most recent snapshot is kept, so the folder never
-  accumulates files. Right after an update that single file is the pre-update
-  snapshot (captured before the new version touched anything); it refreshes to
-  the current state on a later launch.
+- **Rotation** — the most recent snapshot is kept, plus the one taken at the
+  last version change, so the folder holds at most two files. The
+  version-change snapshot is captured before the new version touches anything
+  and is never rotated away: it survives until the *next* update, so a bad
+  update stays undoable for as long as you are running that version. The other
+  file refreshes to the current state on a later launch.
 - **Restoring** — open the backups folder (Settings → **Open backups folder**),
   and copy the `reminders` / `history` arrays from the snapshot's `data` field
   back into `reminders.json` / `history.json` (with the app closed). If you hit a

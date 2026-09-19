@@ -686,3 +686,156 @@ test("restore does not prune the backup it is restoring from in a shared dir", (
     "live data was restored from the backup",
   );
 });
+
+// --- The update safety net -------------------------------------------------
+// These pin the guarantee the app makes to a user who is about to install a new
+// version: whatever the new build does to the data, the dataset as the PREVIOUS
+// version left it is still recoverable.
+
+test("the pre-update snapshot survives the next daily rotation", (t) => {
+  const dir = makeTempDir(t);
+  const store = makeTempDir(t); // backups live outside the data folder
+  const before = [{ id: "a" }, { id: "b" }, { id: "c" }];
+  seed(dir, before, []);
+
+  // Running the old version for a while.
+  Backup.maybeBackupOnStartup(dir, "1.2.2", {
+    now: new Date("2026-09-19T08:00:00.000Z"),
+    backupDir: store,
+  });
+  // First launch of the new version: captures the data the old version left.
+  const update = Backup.maybeBackupOnStartup(dir, "1.3.0", {
+    now: new Date("2026-09-19T09:00:00.000Z"),
+    backupDir: store,
+  });
+  assert.equal(update.reason, "version-change");
+
+  // The new version then loses the reminders, and the user relaunches the next
+  // day — past the 12h staleness window, so a routine "daily" backup fires.
+  seed(dir, [], []);
+  const daily = Backup.maybeBackupOnStartup(dir, "1.3.0", {
+    now: new Date("2026-09-20T09:30:00.000Z"),
+    backupDir: store,
+  });
+  assert.equal(daily.reason, "daily");
+
+  const boundary = Backup.listBackups(dir, store).find(
+    (b) => b.reason === "version-change",
+  );
+  assert.ok(boundary, "the pre-update snapshot was pruned away");
+  assert.equal(boundary.dataVersion, "1.2.2");
+  assert.deepEqual(Backup.loadBackup(boundary.path).data.reminders, before);
+});
+
+test("the pre-update snapshot survives two weeks of launches", (t) => {
+  const dir = makeTempDir(t);
+  const store = makeTempDir(t);
+  const before = [{ id: "a" }, { id: "b" }];
+  seed(dir, before, []);
+
+  Backup.maybeBackupOnStartup(dir, "1.2.2", {
+    now: new Date("2026-09-19T08:00:00.000Z"),
+    backupDir: store,
+  });
+  Backup.maybeBackupOnStartup(dir, "1.3.0", {
+    now: new Date("2026-09-19T09:00:00.000Z"),
+    backupDir: store,
+  });
+  seed(dir, [], []);
+  for (let day = 20; day <= 30; day += 1) {
+    Backup.maybeBackupOnStartup(dir, "1.3.0", {
+      now: new Date(`2026-09-${day}T10:00:00.000Z`),
+      backupDir: store,
+    });
+  }
+
+  const all = Backup.listBackups(dir, store);
+  const boundary = all.find((b) => b.reason === "version-change");
+  assert.ok(boundary, "the pre-update snapshot did not survive");
+  assert.deepEqual(Backup.loadBackup(boundary.path).data.reminders, before);
+  // Protection is bounded: the rolling snapshot plus the one update boundary.
+  assert.equal(all.length, 2, "the backups folder should not accumulate");
+});
+
+test("a second update replaces the protected boundary rather than adding one", (t) => {
+  const dir = makeTempDir(t);
+  const store = makeTempDir(t);
+  seed(dir, [{ id: "a" }], []);
+
+  Backup.maybeBackupOnStartup(dir, "1.2.2", {
+    now: new Date("2026-09-19T08:00:00.000Z"),
+    backupDir: store,
+  });
+  Backup.maybeBackupOnStartup(dir, "1.3.0", {
+    now: new Date("2026-09-20T08:00:00.000Z"),
+    backupDir: store,
+  });
+  Backup.maybeBackupOnStartup(dir, "1.4.0", {
+    now: new Date("2026-09-21T08:00:00.000Z"),
+    backupDir: store,
+  });
+
+  const boundaries = Backup.listBackups(dir, store).filter(
+    (b) => b.reason === "version-change",
+  );
+  assert.equal(boundaries.length, 1, "only the newest boundary is protected");
+  assert.equal(boundaries[0].dataVersion, "1.3.0");
+});
+
+test("listBackups reports why each snapshot was taken", (t) => {
+  const dir = makeTempDir(t);
+  const store = makeTempDir(t);
+  seed(dir, [{ id: "a" }], []);
+  Backup.createBackup(dir, "1.3.0", "manual", {
+    now: new Date("2026-09-19T08:00:00.000Z"),
+    backupDir: store,
+    keep: 1000,
+  });
+  assert.equal(Backup.listBackups(dir, store)[0].reason, "manual");
+});
+
+test("re-releasing the same version number takes no pre-update backup", (t) => {
+  const dir = makeTempDir(t);
+  const store = makeTempDir(t);
+  seed(dir, [{ id: "a" }], []);
+
+  Backup.maybeBackupOnStartup(dir, "1.3.0", {
+    now: new Date("2026-09-19T08:00:00.000Z"),
+    backupDir: store,
+  });
+  // Shipping new code under the SAME version is indistinguishable from a
+  // relaunch, so no snapshot is taken — which is why a release must bump
+  // package.json, not just move the tag.
+  const again = Backup.maybeBackupOnStartup(dir, "1.3.0", {
+    now: new Date("2026-09-19T10:00:00.000Z"),
+    backupDir: store,
+  });
+  assert.equal(again.created, false);
+  assert.equal(again.reason, null);
+});
+
+test("the pre-update snapshot captures a corrupt file before Storage quarantines it", (t) => {
+  const dir = makeTempDir(t);
+  const store = makeTempDir(t);
+  seed(dir, [{ id: "a" }], []);
+  Backup.maybeBackupOnStartup(dir, "1.2.2", {
+    now: new Date("2026-09-19T08:00:00.000Z"),
+    backupDir: store,
+  });
+
+  // The old version left a truncated file behind (e.g. killed mid-write).
+  fs.writeFileSync(path.join(dir, "reminders.json"), '[{"id":"a"');
+  Backup.maybeBackupOnStartup(dir, "1.3.0", {
+    now: new Date("2026-09-19T09:00:00.000Z"),
+    backupDir: store,
+  });
+
+  const boundary = Backup.listBackups(dir, store).find(
+    (b) => b.reason === "version-change",
+  );
+  const env = Backup.loadBackup(boundary.path);
+  // Preserved verbatim rather than recorded as "no reminders", so the bytes can
+  // still be hand-recovered after Storage renames the file away.
+  assert.equal(env.data.reminders.__backupRaw__, true);
+  assert.match(env.data.reminders.text, /^\[\{"id":"a"/);
+});

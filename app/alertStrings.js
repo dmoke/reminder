@@ -1,0 +1,73 @@
+// User-facing strings for the alert window (the main process owns that window,
+// so it localizes it directly from the persisted language preference).
+//
+// Kept out of main.js, which requires electron and so cannot be loaded by
+// `node --test`. Here the two language maps are plain data, which lets a test
+// assert that every snooze preset actually has a label in BOTH languages —
+// the alert window's s() falls back to the raw key, so a missing entry ships a
+// button reading "snooze-30m" rather than "30 min".
+
+const ALERT_STRINGS = {
+  en: {
+    title: "Reminder",
+    "due-now": "Due now",
+    "overdue-by": "Overdue by",
+    complete: "✔ Complete",
+    snooze: "Snooze",
+    dismiss: "Dismiss",
+    "open-app": "Open app",
+    "snooze-10m": "10 min",
+    "snooze-30m": "30 min",
+    "snooze-1h": "1 hour",
+    "snooze-3h": "3 hours",
+    "snooze-5h": "5 hours",
+    "snooze-tomorrow": "Tomorrow",
+    "snooze-2d": "2 days",
+    "snooze-1w": "1 week",
+    "snooze-1mo": "1 month",
+    "snooze-1y": "1 year",
+    "snooze-custom": "✎  Pick my own time…",
+    "snooze-all": "Snooze all",
+    "complete-all": "Complete all",
+    recurring: "Repeats",
+    "overdue-label": "overdue",
+    "mini-open": "Open",
+    minimize: "Minimize",
+    "search-ph": "Search overdue…",
+    "sort-overdue": "Most overdue",
+    "sort-recent": "Least overdue",
+    "no-matches": "No matches",
+  },
+  uk: {
+    title: "Нагадування",
+    "due-now": "Час настав",
+    "overdue-by": "Прострочено на",
+    complete: "✔ Виконати",
+    snooze: "Відкласти",
+    dismiss: "Закрити",
+    "open-app": "Відкрити застосунок",
+    "snooze-10m": "10 хв",
+    "snooze-30m": "30 хв",
+    "snooze-1h": "1 год",
+    "snooze-3h": "3 год",
+    "snooze-5h": "5 год",
+    "snooze-tomorrow": "Завтра",
+    "snooze-2d": "2 дні",
+    "snooze-1w": "1 тиждень",
+    "snooze-1mo": "1 місяць",
+    "snooze-1y": "1 рік",
+    "snooze-custom": "✎  Обрати свій час…",
+    "snooze-all": "Відкласти всі",
+    "complete-all": "Виконати всі",
+    recurring: "Повторюється",
+    "overdue-label": "прострочено",
+    "mini-open": "Відкрити",
+    minimize: "Згорнути",
+    "search-ph": "Пошук прострочених…",
+    "sort-overdue": "Найбільш прострочені",
+    "sort-recent": "Найменш прострочені",
+    "no-matches": "Немає збігів",
+  },
+};
+
+module.exports = ALERT_STRINGS;

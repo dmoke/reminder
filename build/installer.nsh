@@ -21,7 +21,7 @@
   StrCmp $0 "" reminders_proceed
 
   MessageBox MB_OKCANCEL|MB_ICONQUESTION \
-    "Reminders is already installed.$\r$\n$\r$\nUpdate it to this version? Your reminders and settings will be kept." \
+    "Reminders is already installed.$\r$\n$\r$\nUpdate it to this version?$\r$\n$\r$\nYour reminders live in your own data folder, outside the program folder, and this update does not touch it. Your settings are kept, and a snapshot of your reminders is saved automatically the first time the new version starts." \
     IDOK reminders_proceed
   Quit
 

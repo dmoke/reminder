@@ -469,25 +469,10 @@ function syncSortHeaders() {
 }
 
 function getSnoozeTime(baseDate, type) {
-  const date = new Date(baseDate);
-  switch (type) {
-    case "10m":
-      date.setMinutes(date.getMinutes() + 10);
-      break;
-    case "1d":
-      date.setDate(date.getDate() + 1);
-      break;
-    case "2d":
-      date.setDate(date.getDate() + 2);
-      break;
-    case "1w":
-      date.setDate(date.getDate() + 7);
-      break;
-    case "1m":
-      date.setMonth(date.getMonth() + 1);
-      break;
-  }
-  return date.toISOString();
+  // Presets and date math live in ui/snooze.js, shared with the alert window.
+  // Note the base differs by design: cards push a reminder out from its own due
+  // time (the caller passes max(now, due)), the alert measures from now.
+  return window.ReminderSnooze.cardIso(baseDate, type);
 }
 
 // ---- translations ----------------------------------------------------------
@@ -541,10 +526,12 @@ const translations = {
     "backup-desc":
       "Latest snapshot (reminder-backup-<date>.json), refreshed on launch and " +
       "after updates. Kept in a safe app folder outside your data folder, so it " +
-      "survives the data folder being moved or deleted. Share it to restore your " +
-      "reminders. “Back up now” snapshots the current reminders; “Load from " +
-      "backup…” merges a snapshot back in, adding only reminders you don't " +
-      "already have.",
+      "survives the data folder being moved or deleted. The snapshot taken just " +
+      "before an update is kept until the next update, so a new version can " +
+      "always be undone. Installing a new version never touches your data " +
+      "folder. Share it to restore your reminders. “Back up now” snapshots the " +
+      "current reminders; “Load from backup…” merges a snapshot back in, adding " +
+      "only reminders you don't already have.",
     "open-backups-btn": "Open backups folder",
     "force-backup-btn": "Back up now",
     "load-backup-btn": "Load from backup…",
@@ -629,10 +616,13 @@ const translations = {
     "confirm-delete": "Click to confirm",
     "confirm-complete": "Click to confirm",
     "snooze-10m": "10m",
+    "snooze-30m": "30m",
+    "snooze-5h": "5h",
     "snooze-1d": "1d",
     "snooze-2d": "2d",
     "snooze-1w": "1w",
     "snooze-1m": "1mo",
+    "snooze-custom": "✎  Pick my own time…",
     "recur-none": "Does not repeat",
     "recur-daily": "Daily",
     "recur-weekdays": "Every weekday",
@@ -749,7 +739,10 @@ const translations = {
       "Останній знімок (reminder-backup-<дата>.json), оновлюється під час " +
       "запуску та після оновлень. Зберігається в безпечній папці застосунку поза " +
       "вашою папкою з даними, тож не втрачається, якщо ту папку перемістити чи " +
-      "видалити. Поділіться ним, щоб відновити нагадування. «Зробити копію зараз» " +
+      "видалити. Знімок, зроблений безпосередньо перед оновленням, зберігається " +
+      "до наступного оновлення, тож нову версію завжди можна відкотити. Встановлення " +
+      "нової версії ніколи не торкається вашої папки з даними. " +
+      "Поділіться ним, щоб відновити нагадування. «Зробити копію зараз» " +
       "створює знімок поточних нагадувань; «Завантажити з копії…» додає зі знімка " +
       "лише ті нагадування, яких у вас ще немає.",
     "open-backups-btn": "Відкрити папку резервних копій",
@@ -837,10 +830,13 @@ const translations = {
     "confirm-delete": "Натисніть, щоб підтвердити",
     "confirm-complete": "Натисніть, щоб підтвердити",
     "snooze-10m": "10 хв",
+    "snooze-30m": "30 хв",
+    "snooze-5h": "5 год",
     "snooze-1d": "1 д",
     "snooze-2d": "2 д",
     "snooze-1w": "1 тиж",
     "snooze-1m": "1 міс",
+    "snooze-custom": "✎  Обрати свій час…",
     "recur-none": "Не повторювати",
     "recur-daily": "Щодня",
     "recur-weekdays": "Щобудня",
@@ -1094,7 +1090,7 @@ function createCard(reminder, isHistory) {
     snoozeLabel.className = "snooze-label";
     snoozeLabel.textContent = t("card-snooze-label");
     snoozeGroup.appendChild(snoozeLabel);
-    ["10m", "1d", "2d", "1w", "1m"].forEach((type) => {
+    window.ReminderSnooze.CARD_KINDS.forEach((type) => {
       const btn = document.createElement("button");
       btn.className = "card-action snooze-chip";
       btn.textContent = t("snooze-" + type);
@@ -1122,6 +1118,14 @@ function createCard(reminder, isHistory) {
       reload();
     });
     snoozeGroup.appendChild(tomChip);
+    // Pick my own time: the escape hatch from the fixed presets. Same target as
+    // the Edit button, but it belongs in the snooze section — that is where a
+    // user who has just rejected every preset is looking.
+    const customChip = document.createElement("button");
+    customChip.className = "card-action snooze-chip snooze-chip-custom";
+    customChip.textContent = t("snooze-custom");
+    customChip.addEventListener("click", () => openModal("edit", reminder));
+    snoozeGroup.appendChild(customChip);
     actions.appendChild(snoozeGroup);
   } else {
     const dup = document.createElement("button");

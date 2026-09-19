@@ -72,68 +72,21 @@ const MIN_ZOOM = 0.5; // never shrink the UI past this (keeps text legible)
 const MAX_ZOOM = 1.0; // never enlarge past the native design size
 const APPROX_FRAME = 44; // title bar + borders estimate, used only for the first paint
 
-// User-facing strings for the alert window (the main process owns this window,
-// so it localizes it directly from the persisted language preference).
-const ALERT_STRINGS = {
-  en: {
-    title: "Reminder",
-    "due-now": "Due now",
-    "overdue-by": "Overdue by",
-    complete: "✔ Complete",
-    snooze: "Snooze",
-    dismiss: "Dismiss",
-    "open-app": "Open app",
-    "snooze-10m": "10 min",
-    "snooze-1h": "1 hour",
-    "snooze-3h": "3 hours",
-    "snooze-tomorrow": "Tomorrow",
-    "snooze-2d": "2 days",
-    "snooze-1w": "1 week",
-    "snooze-1mo": "1 month",
-    "snooze-1y": "1 year",
-    "snooze-custom": "Custom…",
-    "snooze-all": "Snooze all",
-    "complete-all": "Complete all",
-    recurring: "Repeats",
-    "overdue-label": "overdue",
-    "mini-open": "Open",
-    minimize: "Minimize",
-    "search-ph": "Search overdue…",
-    "sort-overdue": "Most overdue",
-    "sort-recent": "Least overdue",
-    "no-matches": "No matches",
-  },
-  uk: {
-    title: "Нагадування",
-    "due-now": "Час настав",
-    "overdue-by": "Прострочено на",
-    complete: "✔ Виконати",
-    snooze: "Відкласти",
-    dismiss: "Закрити",
-    "open-app": "Відкрити застосунок",
-    "snooze-10m": "10 хв",
-    "snooze-1h": "1 год",
-    "snooze-3h": "3 год",
-    "snooze-tomorrow": "Завтра",
-    "snooze-2d": "2 дні",
-    "snooze-1w": "1 тиждень",
-    "snooze-1mo": "1 місяць",
-    "snooze-1y": "1 рік",
-    "snooze-custom": "Свій час…",
-    "snooze-all": "Відкласти всі",
-    "complete-all": "Виконати всі",
-    recurring: "Повторюється",
-    "overdue-label": "прострочено",
-    "mini-open": "Відкрити",
-    minimize: "Згорнути",
-    "search-ph": "Пошук прострочених…",
-    "sort-overdue": "Найбільш прострочені",
-    "sort-recent": "Найменш прострочені",
-    "no-matches": "Немає збігів",
-  },
-};
+// User-facing strings for the alert window. Extracted to app/alertStrings.js
+// so the language maps stay unit-testable (main.js requires electron).
+const ALERT_STRINGS = require("./alertStrings");
 
 app.setAppUserModelId("com.reminder.app");
+
+// Pin the userData folder name. app.getName() falls back to package.json's
+// `name`, and everything that must outlive an update hangs off it: the
+// config.json that remembers the data folder, and the backups/ store — both
+// under %APPDATA%/reminder. Adding a top-level "productName" to package.json
+// — a one-word change that looks purely cosmetic — would silently move all of
+// it to %APPDATA%/Reminders, and every existing user would launch into
+// first-run setup with their reminders stranded. Setting it explicitly makes
+// that impossible.
+app.setName("reminder");
 
 // Development (`npm start`) and the installed build otherwise SHARE one userData
 // dir (%APPDATA%\reminder), so a dev or smoke run silently overwrites the
@@ -293,9 +246,56 @@ function initApp() {
   // or deleted.
   runStartupBackup(config.dataPath);
   storage = new Storage(config.dataPath, notifyRefresh);
+  warnAboutStorageTrouble();
+  warnAboutUnsafeDataFolder();
   scheduler = new Scheduler(storage, handleDue);
   scheduler.start();
   return true;
+}
+
+// If a data file could not be read, say so. An empty list presented in silence
+// is indistinguishable from "the update deleted everything", and the two need
+// very different reactions from the user.
+function warnAboutStorageTrouble() {
+  const failure = storage && storage.lastReadFailure;
+  if (!failure) return;
+  const intro = `Reminders could not read ${failure.file}.`;
+  const detail = failure.quarantined
+    ? `The unreadable file was set aside as ${path.basename(failure.backupPath)} ` +
+      `and a new empty one was started.`
+    : "The original file has been left untouched and nothing will be saved " +
+      "over it, so no data has been lost. This is usually a temporary lock " +
+      "from antivirus or a file-sync tool — close Reminders and open it again " +
+      "in a moment.";
+  dialog.showMessageBox({
+    type: "warning",
+    title: "Reminders",
+    message: intro,
+    detail:
+      `${detail}\n\nReason: ${failure.message}\n\n` +
+      "You can restore a snapshot from Settings > Backups > Load from backup.",
+    buttons: ["OK"],
+  });
+}
+
+// The folder guard runs when a folder is PICKED, which does nothing for a
+// folder chosen by an earlier version. Check the stored one too, once, at
+// startup — warn rather than block, since the reminders are in there.
+function warnAboutUnsafeDataFolder() {
+  const problem = dataFolderProblem(config.dataPath);
+  if (!problem) return;
+  if (config.unsafeFolderWarned === config.dataPath) return;
+  config.unsafeFolderWarned = config.dataPath;
+  Config.save(config);
+  dialog.showMessageBox({
+    type: "warning",
+    title: "Move your reminders somewhere safer",
+    message: problem,
+    detail:
+      "Use Settings > Data folder > Change to move them before you install " +
+      "another update.",
+    buttons: ["OK"],
+  });
 }
 
 function createTrayInstance() {
@@ -485,7 +485,11 @@ function ensureAlertWindow() {
   alertReady = false;
   const win = new BrowserWindow({
     width: 460,
-    height: 560,
+    // Each row now carries ten snooze presets plus the full-width
+    // "pick my own time" action, so a row is roughly 70px taller than it was.
+    // Without matching height the window would show noticeably fewer overdue
+    // reminders at a glance than before the presets were added.
+    height: 640,
     resizable: true,
     minimizable: true,
     maximizable: false,
@@ -856,13 +860,70 @@ function sanitizeUpdates(updates) {
   return Object.keys(clean).length ? clean : null;
 }
 
+// Reject a data folder that an installer or uninstaller would wipe.
+//
+// The NSIS uninstaller electron-builder generates runs an unconditional
+// `RMDir /r $INSTDIR` — and it runs during every in-place UPDATE, not just an
+// uninstall. With allowToChangeInstallationDirectory enabled the user picks the
+// program folder themselves, so "keep my reminders next to the app" is a
+// plausible, and permanently destructive, choice. Everything else about an
+// update leaves the data folder alone; this is the one way to opt out of that.
+// Returns a message to show, or null when the folder is fine.
+function dataFolderProblem(dir) {
+  const contains = (parent) => {
+    if (!parent) return false;
+    const rel = path.relative(parent, dir);
+    return rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel));
+  };
+  if (app.isPackaged && contains(path.dirname(process.execPath))) {
+    return (
+      "That folder is inside the Reminders program folder.\n\n" +
+      "Installing an update replaces that folder, which would delete your " +
+      "reminders. Please choose a folder in your personal files instead — " +
+      "Documents, Desktop or OneDrive all work."
+    );
+  }
+  for (const base of [
+    process.env.ProgramFiles,
+    process.env["ProgramFiles(x86)"],
+  ]) {
+    if (contains(base)) {
+      return (
+        "That folder is inside Program Files.\n\n" +
+        "Installers can replace folders there, and Windows restricts writing " +
+        "to them. Please choose a folder in your personal files instead — " +
+        "Documents, Desktop or OneDrive all work."
+      );
+    }
+  }
+  return null;
+}
+
+// Prompt for a data folder, re-asking while the chosen one is unsafe.
+// Returns the chosen path, or null if the user cancelled.
+async function promptForDataFolder() {
+  for (;;) {
+    const result = await dialog.showOpenDialog({
+      properties: ["openDirectory"],
+      title: "Select folder for reminders",
+    });
+    if (result.canceled) return null;
+    const dir = result.filePaths[0];
+    const problem = dataFolderProblem(dir);
+    if (!problem) return dir;
+    await dialog.showMessageBox({
+      type: "warning",
+      title: "Choose a different folder",
+      message: problem,
+      buttons: ["Choose another folder"],
+    });
+  }
+}
+
 async function firstLaunchSetup() {
-  const result = await dialog.showOpenDialog({
-    properties: ["openDirectory"],
-    title: "Select folder for reminders",
-  });
-  if (result.canceled) return false;
-  config.dataPath = result.filePaths[0];
+  const dir = await promptForDataFolder();
+  if (!dir) return false;
+  config.dataPath = dir;
   Config.save(config);
   return true;
 }
@@ -971,12 +1032,9 @@ ipcMain.handle("set-alert-cooldown", (event, seconds) => {
   return config.alertCooldownSeconds;
 });
 ipcMain.handle("choose-folder", async () => {
-  const result = await dialog.showOpenDialog({
-    properties: ["openDirectory"],
-    title: "Select folder for reminders",
-  });
-  if (result.canceled) return null;
-  config.dataPath = result.filePaths[0];
+  const dir = await promptForDataFolder();
+  if (!dir) return null;
+  config.dataPath = dir;
   Config.save(config);
   // Logs follow the data folder, so a switch starts writing to the new folder's
   // logs/ dir from here on.
@@ -1219,6 +1277,24 @@ app.whenReady().then(async () => {
     });
   });
   if (!initApp()) {
+    // Never run first-launch setup over a config we merely failed to READ —
+    // saving a new one would forget the existing data folder for good. Stop
+    // instead: the next launch, once the file is readable again, picks up
+    // exactly where this one left off.
+    if (config && config.unreadable) {
+      dialog.showErrorBox(
+        "Reminders",
+        "Your settings file could not be read, so Reminders has stopped rather " +
+          "than risk forgetting where your reminders are saved.\n\n" +
+          `File: ${path.join(app.getPath("userData"), "config.json")}\n` +
+          `Reason: ${config.unreadable}\n\n` +
+          "Your reminders have not been touched. Please try launching again in " +
+          "a moment — this is usually a temporary lock from antivirus or a " +
+          "file-sync tool.",
+      );
+      app.quit();
+      return;
+    }
     const chosen = await firstLaunchSetup();
     if (!chosen || !initApp()) {
       app.quit();

@@ -320,3 +320,191 @@ test("valid JSON that is not an array is quarantined to a *.bak file and getActi
   storage.add({ id: "ok", text: "still works" });
   assert.deepEqual(storage.getActive().map((r) => r.id), ["ok"]);
 });
+
+test("an unreadable file is left intact when it cannot be quarantined", (t) => {
+  const dir = makeTempDir(t);
+  const activePath = path.join(dir, "reminders.json");
+  const original = '[{"id":"a"},{"id":"b"}';  // truncated mid-write
+  fs.writeFileSync(activePath, original);
+
+  // Make the quarantine rename fail, the way a lock from antivirus, a OneDrive
+  // sync or a permissions blip does. The read failure is then very likely
+  // transient — and these bytes are the user's only copy, so overwriting them
+  // with [] would turn a hiccup into permanent loss.
+  const realRename = fs.renameSync;
+  fs.renameSync = (from, to) => {
+    if (String(to).endsWith(".bak")) {
+      throw Object.assign(new Error("EBUSY: resource busy or locked"), {
+        code: "EBUSY",
+      });
+    }
+    return realRename(from, to);
+  };
+  t.after(() => {
+    fs.renameSync = realRename;
+  });
+
+  const storage = new Storage(dir, () => {});
+
+  // The app still starts, just with nothing loaded for this session.
+  assert.deepEqual(storage.getActive(), []);
+  // …and the file on disk is byte-for-byte what it was.
+  assert.equal(
+    fs.readFileSync(activePath, "utf8"),
+    original,
+    "the original bytes must survive a failed quarantine",
+  );
+  assert.equal(storage.lastReadFailure.quarantined, false);
+  assert.equal(storage.lastReadFailure.file, "reminders.json");
+});
+
+test("a successful quarantine still starts a fresh empty file", (t) => {
+  const dir = makeTempDir(t);
+  const activePath = path.join(dir, "reminders.json");
+  fs.writeFileSync(activePath, "{ not an array");
+
+  const storage = new Storage(dir, () => {});
+
+  assert.deepEqual(storage.getActive(), []);
+  assert.deepEqual(readJSON(activePath), [], "a usable empty list takes over");
+  assert.equal(storage.lastReadFailure.quarantined, true);
+  assert.ok(
+    fs.existsSync(storage.lastReadFailure.backupPath),
+    "the original content is preserved alongside",
+  );
+});
+
+function writeJSON(filePath, value) {
+  fs.writeFileSync(filePath, JSON.stringify(value, null, 2));
+}
+
+// Blocks a rename to *.bak so a file can neither be read nor set aside — the
+// "locked by antivirus / mid-sync" case. Restores itself after the test.
+function blockQuarantine(t) {
+  const realRename = fs.renameSync;
+  fs.renameSync = (from, to) => {
+    if (String(to).endsWith(".bak")) {
+      throw Object.assign(new Error("EBUSY: resource busy or locked"), {
+        code: "EBUSY",
+      });
+    }
+    return realRename(from, to);
+  };
+  t.after(() => {
+    fs.renameSync = realRename;
+  });
+}
+
+test("a preserved file survives a whole session of writes, not just the read", (t) => {
+  const dir = makeTempDir(t);
+  const activePath = path.join(dir, "reminders.json");
+  const original = '[{"id":"REAL"}';
+  fs.writeFileSync(activePath, original);
+  blockQuarantine(t);
+
+  const storage = new Storage(dir, () => {});
+  // Ordinary user actions that each end in a write to reminders.json.
+  storage.add({ id: "new" });
+  storage.update("new", { text: "x" });
+
+  assert.equal(
+    fs.readFileSync(activePath, "utf8"),
+    original,
+    "writes must not overwrite a file we failed to preserve",
+  );
+});
+
+test("completing a reminder is refused rather than losing it, when history is stuck", (t) => {
+  const dir = makeTempDir(t);
+  writeJSON(path.join(dir, "reminders.json"), [
+    { id: "a", text: "pay rent" },
+    { id: "b", text: "call mom" },
+  ]);
+  fs.writeFileSync(path.join(dir, "history.json"), "{ truncated");
+  blockQuarantine(t);
+
+  const storage = new Storage(dir, () => {});
+  // Completing MOVES the reminder between the two files. If the history side
+  // cannot be written, doing the active side anyway drops it from both.
+  assert.equal(storage.archive("a"), false);
+  assert.deepEqual(
+    readJSON(path.join(dir, "reminders.json")).map((r) => r.id),
+    ["a", "b"],
+    "the reminder must still be in the active list",
+  );
+});
+
+test("a recurring occurrence is not skipped when history is stuck", (t) => {
+  const dir = makeTempDir(t);
+  writeJSON(path.join(dir, "reminders.json"), [
+    { id: "a", time: "2026-09-19T09:00:00.000Z" },
+  ]);
+  fs.writeFileSync(path.join(dir, "history.json"), "{ truncated");
+  blockQuarantine(t);
+
+  const storage = new Storage(dir, () => {});
+  assert.equal(storage.recurComplete("a", "2026-09-26T09:00:00.000Z"), false);
+  assert.equal(
+    readJSON(path.join(dir, "reminders.json"))[0].time,
+    "2026-09-19T09:00:00.000Z",
+    "advancing without recording the occurrence would silently lose it",
+  );
+});
+
+test("deleting is refused rather than half-applied when history is stuck", (t) => {
+  const dir = makeTempDir(t);
+  writeJSON(path.join(dir, "reminders.json"), [{ id: "a" }]);
+  fs.writeFileSync(path.join(dir, "history.json"), "{ truncated");
+  blockQuarantine(t);
+
+  const storage = new Storage(dir, () => {});
+  assert.equal(storage.delete("a"), false);
+  assert.deepEqual(readJSON(path.join(dir, "reminders.json")), [{ id: "a" }]);
+});
+
+test("restoring a backup is refused rather than dropping its completed half", (t) => {
+  const dir = makeTempDir(t);
+  writeJSON(path.join(dir, "reminders.json"), []);
+  fs.writeFileSync(path.join(dir, "history.json"), "{ truncated");
+  blockQuarantine(t);
+
+  const storage = new Storage(dir, () => {});
+  const summary = storage.mergeFromBackup({
+    reminders: [{ id: "x" }],
+    history: [{ id: "h" }],
+  });
+  assert.equal(summary.added, 0);
+  assert.ok(summary.error, "the caller must be told the restore did not happen");
+});
+
+test("once the file is readable again, normal operation resumes", (t) => {
+  const dir = makeTempDir(t);
+  const activePath = path.join(dir, "reminders.json");
+  fs.writeFileSync(activePath, '[{"id":"REAL"}');
+
+  const realRename = fs.renameSync;
+  let blocking = true;
+  fs.renameSync = (from, to) => {
+    if (blocking && String(to).endsWith(".bak")) {
+      throw Object.assign(new Error("EBUSY"), { code: "EBUSY" });
+    }
+    return realRename(from, to);
+  };
+  t.after(() => {
+    fs.renameSync = realRename;
+  });
+
+  const blocked = new Storage(dir, () => {});
+  blocked.add({ id: "ignored" });
+  assert.equal(fs.readFileSync(activePath, "utf8"), '[{"id":"REAL"}');
+
+  // The lock clears and the file is valid again.
+  blocking = false;
+  writeJSON(activePath, [{ id: "REAL" }]);
+  const recovered = new Storage(dir, () => {});
+  recovered.add({ id: "later" });
+  assert.deepEqual(
+    readJSON(activePath).map((r) => r.id),
+    ["REAL", "later"],
+  );
+});

@@ -7,6 +7,10 @@ class Storage {
     this.activePath = path.join(dataPath, "reminders.json");
     this.historyPath = path.join(dataPath, "history.json");
     this.onChange = typeof onChange === "function" ? onChange : () => {};
+    // Paths that must not be written: see writeFile. Populated by readFile, so
+    // it has to exist before the first read below.
+    this.protected = new Set();
+    this.lastReadFailure = null;
     // Keep active reminders in memory so the scheduler does not re-read and
     // re-parse the file from disk every second.
     this.active = this.readFile(this.activePath);
@@ -20,6 +24,8 @@ class Storage {
       // and crash the scheduler on the first push/findIndex. Treat it as corrupt
       // so it is quarantined and replaced with a usable empty list.
       if (!Array.isArray(parsed)) throw new Error("expected a JSON array");
+      // Readable again: whatever was holding the file has let go.
+      this.protected.delete(filePath);
       return parsed;
     } catch (err) {
       if (err.code === "ENOENT") {
@@ -31,24 +37,64 @@ class Storage {
       // instead of silently discarding the user's data.
       console.error(`storage: failed to read ${filePath}: ${err.message}`);
       const backupPath = `${filePath}.${Date.now()}.bak`;
+      let quarantined = false;
       try {
         fs.renameSync(filePath, backupPath);
+        quarantined = true;
         console.error(`storage: corrupt file moved to ${backupPath}`);
-      } catch {
-        // ignore – nothing more we can do
+      } catch (renameErr) {
+        console.error(
+          `storage: could not quarantine ${filePath} (${renameErr.message}); leaving it on disk`,
+        );
       }
-      this.writeFile(filePath, []);
+      // Only start a fresh empty file once the original is safely set aside.
+      // If the rename failed the read failure was probably transient — a lock
+      // held by AV, OneDrive mid-sync, or a brief permissions blip — and the
+      // bytes are still the user's only copy. Writing [] here would replace
+      // them for good (writeFile renames over the destination), turning a
+      // recoverable hiccup into real data loss. Run empty for this session and
+      // let the next launch, or a restore, find the file intact.
+      if (quarantined) {
+        this.writeFile(filePath, []);
+        this.protected.delete(filePath);
+      } else {
+        // Preserving the bytes is not enough on its own: this.active is now
+        // empty, and the very next add/update/archive would write that empty
+        // list straight over the file we just decided not to touch. Seal the
+        // path instead — writeFile refuses it until a later read succeeds.
+        this.protected.add(filePath);
+      }
+      // Record what happened so the app can tell the user instead of silently
+      // presenting an empty list that looks exactly like "my reminders vanished".
+      this.lastReadFailure = {
+        file: path.basename(filePath),
+        path: filePath,
+        quarantined,
+        backupPath: quarantined ? backupPath : null,
+        message: err.message,
+      };
       return [];
     }
   }
 
   writeFile(filePath, data) {
+    // This file could not be read AND could not be set aside, so the bytes on
+    // disk are the user's only copy and we are holding an empty list. Writing
+    // would destroy them. Skip it; a later successful read clears the seal.
+    if (this.protected.has(filePath)) {
+      console.error(
+        `storage: refusing to overwrite ${filePath} - it could not be read ` +
+          `and the original has not been preserved`,
+      );
+      return false;
+    }
     // The configured data folder may be missing (deleted, moved, or on an
     // unmounted drive). Recreate it rather than crashing on launch.
     fs.mkdirSync(path.dirname(filePath), { recursive: true });
     const tempPath = filePath + ".tmp";
     fs.writeFileSync(tempPath, JSON.stringify(data, null, 2));
     fs.renameSync(tempPath, filePath);
+    return true;
   }
 
   notify() {
@@ -65,6 +111,15 @@ class Storage {
 
   getHistory() {
     return this.readFile(this.historyPath);
+  }
+
+  // True when history.json is sealed (unreadable AND not preserved), so any
+  // operation that MOVES a reminder between the two files must not start:
+  // the active write would commit and the history write would be refused,
+  // leaving the reminder in neither file. Call AFTER getHistory(), which
+  // re-reads and lifts the seal if the trouble has passed.
+  historyUnavailable() {
+    return this.protected.has(this.historyPath);
   }
 
   add(reminder) {
@@ -84,10 +139,12 @@ class Storage {
 
   delete(id) {
     const history = this.getHistory().filter((r) => r.id !== id);
+    if (this.historyUnavailable()) return false;
     this.active = this.active.filter((r) => r.id !== id);
     this.writeFile(this.activePath, this.active);
     this.writeFile(this.historyPath, history);
     this.notify();
+    return true;
   }
 
   archive(id, updates = {}) {
@@ -97,9 +154,14 @@ class Storage {
       done: true,
       completedAt: new Date().toISOString(),
     });
-    this.active.splice(index, 1);
+    // Read history BEFORE mutating anything: completing a reminder moves it
+    // from one file to the other, and if the history side cannot be written
+    // the move must not start at all — otherwise the active write commits, the
+    // history write is refused, and the reminder exists in neither file.
     const history = this.getHistory();
+    if (this.historyUnavailable()) return false;
     history.unshift(reminder);
+    this.active.splice(index, 1);
     this.writeFile(this.activePath, this.active);
     this.writeFile(this.historyPath, history);
     this.notify();
@@ -140,6 +202,10 @@ class Storage {
   importReminders(reminders) {
     const list = Array.isArray(reminders) ? reminders : [];
     const history = this.getHistory();
+    if (this.historyUnavailable()) {
+      return { added: 0, completed: 0, skipped: 0, total: list.length,
+        error: "history.json is unreadable" };
+    }
     const seen = new Set();
     for (const r of this.active) if (r.importId) seen.add(r.importId);
     for (const r of history) if (r.importId) seen.add(r.importId);
@@ -185,6 +251,13 @@ class Storage {
     const incomingActive = Array.isArray(data.reminders) ? data.reminders : [];
     const incomingHistory = Array.isArray(data.history) ? data.history : [];
     const history = this.getHistory();
+    // Restoring into a store whose history cannot be read would silently drop
+    // the completed half of the snapshot — refuse so the user can retry.
+    if (this.historyUnavailable()) {
+      return { addedActive: 0, addedHistory: 0, added: 0, skipped: 0,
+        total: incomingActive.length + incomingHistory.length,
+        error: "history.json is unreadable" };
+    }
 
     // Every id already on disk — adding one of these would duplicate it.
     const seen = new Set();
@@ -243,6 +316,9 @@ class Storage {
       completedAt: new Date().toISOString(),
     });
     const history = this.getHistory();
+    // Same reasoning as archive(): advancing the reminder while the completed
+    // occurrence fails to reach history would silently drop that occurrence.
+    if (this.historyUnavailable()) return false;
     history.unshift(snapshot);
     this.active[index].time = nextTime;
     this.writeFile(this.activePath, this.active);

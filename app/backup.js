@@ -26,10 +26,11 @@ const FILE_RE = /^reminder-backup-.*\.json$/;
 // At startup we take a new backup only if the newest one is older than this
 // (a version change always forces one regardless — see maybeBackupOnStartup).
 const DEFAULT_MAX_AGE_MS = 12 * 60 * 60 * 1000; // 12h
-// How many automatic backups to retain — only the most recent snapshot is kept
-// by default, so the backups folder never accumulates files. Right after an
-// update this single file is the pre-update snapshot (the version-change backup
-// captured before the new version touched the data).
+// How many automatic backups to retain by rotation — only the most recent
+// snapshot, so the backups folder never accumulates files. prune() additionally
+// protects the newest "version-change" snapshot (the one captured before a new
+// version first touched the data) from rotation entirely, so the store holds at
+// most two files: the current rolling snapshot and the last update boundary.
 const DEFAULT_KEEP = 1;
 
 // The files that together make up one complete reminder dataset. A backup
@@ -248,6 +249,7 @@ function listBackups(dataPath, backupDir) {
       ? Math.floor(stat.mtimeMs)
       : parsedTime;
     const appVersion = env && env.appVersion != null ? env.appVersion : null;
+    const reason = env && typeof env.reason === "string" ? env.reason : null;
     const dataVersion =
       env && env.dataVersion != null ? env.dataVersion : appVersion;
     // Which sources this snapshot actually captured as data (an array — possibly
@@ -264,6 +266,7 @@ function listBackups(dataPath, backupDir) {
       path: full,
       appVersion,
       dataVersion,
+      reason,
       createdAt,
       sortKey,
       valid,
@@ -296,6 +299,18 @@ function prune(dataPath, keep = DEFAULT_KEEP, list = null, backupDir) {
     const holder = all.find((b) => b.captured && b.captured[key]);
     if (holder) protectedPaths.add(holder.path);
   }
+  // The update safety net. A "version-change" snapshot holds the dataset as the
+  // PREVIOUS version left it, so it is the one backup that answers "the update
+  // ate my reminders". Without this guard it is ordinary rotation fodder: at the
+  // default keep=1 the next "daily" backup — roughly 12h after the update —
+  // evicts it, and the pre-update data becomes unrecoverable while the user is
+  // still discovering what changed. Protecting the NEWEST one costs at most one
+  // extra file: the next update's snapshot takes over this slot and the older
+  // one becomes prunable again.
+  const lastUpdateBoundary = all.find(
+    (b) => b.valid && b.reason === "version-change",
+  );
+  if (lastUpdateBoundary) protectedPaths.add(lastUpdateBoundary.path);
   const removed = [];
   for (const b of all.slice(keep)) {
     if (protectedPaths.has(b.path)) continue; // sole good copy of some source

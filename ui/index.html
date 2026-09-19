@@ -217,10 +217,12 @@
           <p id="backupDesc" class="storage-subtext">
             Latest snapshot (reminder-backup-&lt;date&gt;.json), refreshed on
             launch and after updates. Kept in a safe app folder outside your data
-            folder, so it survives the data folder being moved or deleted. Share
-            it to restore your reminders. “Back up now” snapshots the current
-            reminders; “Load from backup…” merges a snapshot back in, adding only
-            reminders you don't already have.
+            folder, so it survives the data folder being moved or deleted. The
+            snapshot taken just before an update is kept until the next update,
+            so a new version can always be undone. Installing a new version never
+            touches your data folder. Share it to restore your reminders. “Back
+            up now” snapshots the current reminders; “Load from backup…” merges a
+            snapshot back in, adding only reminders you don't already have.
           </p>
           <p id="backupResult" class="storage-subtext import-result hidden"></p>
         </div>
@@ -463,6 +465,7 @@
       </div>
     </div>
 
+    <script src="snooze.js"></script>
     <script src="calendar.js"></script>
     <script src="renderer.js"></script>
   </body>
