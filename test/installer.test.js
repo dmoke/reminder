@@ -48,8 +48,10 @@ test("the refusal still applies during a silent install", () => {
   // A silent run cannot show the message box, but it must abort rather than
   // fall through and install over the data.
   const guard = macroBody("customInit").split("reminders_dir_ok:")[0];
-  assert.ok(guard.includes("IfSilent reminders_dir_abort"));
-  assert.ok(guard.includes("Abort"));
+  assert.ok(guard.includes("IfSilent reminders_dir_stop"));
+  // Quit, not Abort: Abort inside .onInit crashes the installer instead of
+  // exiting cleanly, which shows the user a Windows crash box.
+  assert.ok(guard.includes("Quit"));
 });
 
 test("the update confirmation is never shown during a silent run", () => {

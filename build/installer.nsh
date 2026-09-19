@@ -36,10 +36,12 @@
   ; during an update does an unconditional RMDir /r $INSTDIR. Refuse instead —
   ; a failed install is recoverable, a deleted reminders.json is not.
   IfFileExists "$INSTDIR\reminders.json" 0 reminders_dir_ok
-    IfSilent reminders_dir_abort
+    IfSilent reminders_dir_stop
     MessageBox MB_OK|MB_ICONSTOP "${REMINDERS_DATA_DIR_MSG}"
-    reminders_dir_abort:
-    Abort
+    reminders_dir_stop:
+    ; Quit, not Abort: this runs inside .onInit, where Abort leaves the
+    ; half-initialised installer to unwind and crash instead of exiting.
+    Quit
   reminders_dir_ok:
 
   ; Never prompt during a silent / auto-update run (e.g. a background updater
