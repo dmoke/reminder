@@ -29,7 +29,7 @@ After installing, Reminders launches into the system tray and (by default) start
 - **Add reminders** — enter reminder text and pick a date/time (year, month, day, hour, minute) with a dropdown-assisted picker, plus a **Now** shortcut.
 - **Organized views** — see counts and lists for **Upcoming**, **Overdue**, and **Completed** reminders.
 - **Search** — filter active and completed reminders by text.
-- **Snooze** — postpone an active reminder by 10 minutes, 30 minutes, 5 hours, 1 day, 2 days, 1 week, 1 month, or tomorrow at the same time. The alert window adds 1 hour, 3 hours and 1 year. **Pick my own time…** opens the editor for any other time.
+- **Snooze** — postpone an active reminder by 10 minutes, 30 minutes, 5 hours, 1 day, 2 days, 4 days, 1 week, 1 month, or tomorrow at the same time. The alert window adds 1 hour, 3 hours and 1 year. **Pick my own time…** opens the editor for any other time.
 - **Reschedule / edit** — change a reminder's text or time.
 - **Complete & delete** — mark reminders done (archived to history) or delete them outright.
 - **History management** — delete completed reminders by time range (last hour, today, last 7 days, all time).

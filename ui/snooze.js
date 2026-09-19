@@ -34,6 +34,7 @@ var ReminderSnooze = (function () {
     "5h": { hours: 5 },
     "1d": { days: 1 },
     "2d": { days: 2 },
+    "4d": { days: 4 },
     "1w": { days: 7 },
     "1mo": { months: 1 },
     "1m": { months: 1 },
@@ -50,6 +51,7 @@ var ReminderSnooze = (function () {
     "5h",
     "tomorrow",
     "2d",
+    "4d",
     "1w",
     "1mo",
     "1y",
@@ -57,11 +59,11 @@ var ReminderSnooze = (function () {
 
   // Preset order for the main-window cards. The "Tomorrow (same time)" chip is
   // appended separately by the renderer, so it is not listed here.
-  var CARD_KINDS = ["10m", "30m", "5h", "1d", "2d", "1w", "1m"];
+  var CARD_KINDS = ["10m", "30m", "5h", "1d", "2d", "4d", "1w", "1m"];
 
   // Kinds that keep the reminder's own time-of-day rather than the current
   // clock time, so "2 days" on a 09:00 reminder stays a 09:00 reminder.
-  var DAY_KINDS = { tomorrow: 1, "2d": 2, "1w": 7 };
+  var DAY_KINDS = { tomorrow: 1, "2d": 2, "4d": 4, "1w": 7 };
 
   // Fallback when a kind is not recognized, matching the alert window's
   // long-standing behavior: never leave the reminder due, nudge it 10 minutes.

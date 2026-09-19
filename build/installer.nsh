@@ -3,13 +3,45 @@
 ; electron-builder auto-includes build/installer.nsh and invokes these macros at
 ; defined points in its generated installer/uninstaller scripts.
 ;
-; customInit runs early in the installer's .onInit. When the app is already
-; installed we ask the user to confirm before continuing; choosing Cancel aborts
-; the installer. Either way nothing destructive happens here — the in-place
-; update preserves settings, and the uninstaller never touches the user-chosen
-; reminders data folder.
+; Two jobs here:
+;   1. Refuse to install into a folder that holds reminder data. This is the one
+;      way an update can destroy reminders, and it is not hypothetical — see the
+;      comment on customInit below.
+;   2. Confirm before updating an existing install, and say plainly that the
+;      user's data is not touched.
+
+; Shared message for the "that folder holds your reminders" refusal.
+!define REMINDERS_DATA_DIR_MSG "This folder holds your reminders (reminders.json).$\r$\n$\r$\nReminders cannot be installed here. Installing replaces everything in the program folder, which would delete them.$\r$\n$\r$\nChoose an empty folder, or accept the default location. Your reminders folder is chosen separately, inside the app."
+
+!macro customHeader
+  ; Blocks the Next button on the directory page when the chosen folder holds
+  ; reminder data. Covers a fresh install where the user browses to their own
+  ; data folder — at that point .onInit has long since run.
+  Function .onVerifyInstDir
+    IfFileExists "$INSTDIR\reminders.json" 0 reminders_verify_ok
+      Abort
+    reminders_verify_ok:
+  FunctionEnd
+!macroend
 
 !macro customInit
+  ; initMultiUser has already run, so $INSTDIR is the folder this install will
+  ; actually use — including the one remembered from a PREVIOUS install, which
+  ; is what a silent or in-place update inherits without ever showing a
+  ; directory page.
+  ;
+  ; That inherited path is the dangerous case. If an earlier version was once
+  ; installed into a folder the user later also picked for their data, every
+  ; subsequent update silently wipes it: the uninstaller electron-builder runs
+  ; during an update does an unconditional RMDir /r $INSTDIR. Refuse instead —
+  ; a failed install is recoverable, a deleted reminders.json is not.
+  IfFileExists "$INSTDIR\reminders.json" 0 reminders_dir_ok
+    IfSilent reminders_dir_abort
+    MessageBox MB_OK|MB_ICONSTOP "${REMINDERS_DATA_DIR_MSG}"
+    reminders_dir_abort:
+    Abort
+  reminders_dir_ok:
+
   ; Never prompt during a silent / auto-update run (e.g. a background updater
   ; invoking the installer with /S) — a modal dialog would hang it.
   IfSilent reminders_proceed

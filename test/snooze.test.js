@@ -22,6 +22,7 @@ test("the alert window offers 30m and 5h, in ascending order", () => {
     "5h",
     "tomorrow",
     "2d",
+    "4d",
     "1w",
     "1mo",
     "1y",
@@ -29,7 +30,9 @@ test("the alert window offers 30m and 5h, in ascending order", () => {
 });
 
 test("the main-window cards offer 30m and 5h, in ascending order", () => {
-  assert.deepEqual(Snooze.CARD_KINDS, ["10m", "30m", "5h", "1d", "2d", "1w", "1m"]);
+  assert.deepEqual(Snooze.CARD_KINDS, [
+    "10m", "30m", "5h", "1d", "2d", "4d", "1w", "1m",
+  ]);
 });
 
 test("30m lands exactly 30 minutes ahead", () => {
@@ -57,7 +60,7 @@ test("the short presets are measured from now, not from the reminder", () => {
 
 test("day-based presets still keep the reminder's own time-of-day", () => {
   const base = new Date("2026-09-18T07:15:00.000Z");
-  for (const [kind, days] of [["tomorrow", 1], ["2d", 2], ["1w", 7]]) {
+  for (const [kind, days] of [["tomorrow", 1], ["2d", 2], ["4d", 4], ["1w", 7]]) {
     const out = new Date(Snooze.alertIso(kind, base.toISOString(), NOW));
     assert.equal(out.getHours(), base.getHours(), `${kind} hours`);
     assert.equal(out.getMinutes(), base.getMinutes(), `${kind} minutes`);
