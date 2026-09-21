@@ -44,14 +44,33 @@ test("the refusal covers a folder the user browses to", () => {
   assert.ok(header.includes(DATA_FILE_TEST));
 });
 
-test("the refusal still applies during a silent install", () => {
-  // A silent run cannot show the message box, but it must abort rather than
-  // fall through and install over the data.
+test("a silent install stops rather than installing over the data", () => {
+  // A silent run can neither ask nor let the user pick another folder, so it
+  // must stop rather than fall through and install over the data.
   const guard = macroBody("customInit").split("reminders_dir_ok:")[0];
-  assert.ok(guard.includes("IfSilent reminders_dir_stop"));
+  assert.ok(guard.includes("IfSilent 0 reminders_dir_retarget"));
   // Quit, not Abort: Abort inside .onInit crashes the installer instead of
   // exiting cleanly, which shows the user a Windows crash box.
   assert.ok(guard.includes("Quit"));
+});
+
+test("an interactive install is retargeted instead of dead-ended", () => {
+  // $INSTDIR in customInit comes from the previous install's registry entry,
+  // so quitting there left no folder the user could pick to get past it — the
+  // refusal fired whatever folder setup was started from. Point the install at
+  // the default location and carry on instead.
+  const guard = macroBody("customInit").split("reminders_dir_ok:")[0];
+  const retarget = guard.split("reminders_dir_retarget:")[1];
+  assert.ok(retarget, "customInit must have an interactive retarget branch");
+  assert.ok(
+    retarget.includes('StrCpy $INSTDIR "$LOCALAPPDATA\\Programs\\${APP_FILENAME}"'),
+    "the install must be pointed at the default location",
+  );
+  // ...and only after checking the default is not itself a data folder: the
+  // directory page is skipped for an updater-driven run, so a blind fall
+  // through could still wipe reminders.
+  assert.ok(retarget.indexOf(DATA_FILE_TEST) > retarget.indexOf("StrCpy $INSTDIR"));
+  assert.ok(retarget.includes("Quit"), "an unsafe default must still stop setup");
 });
 
 test("the update confirmation is never shown during a silent run", () => {

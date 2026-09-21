@@ -4,16 +4,25 @@
 ; defined points in its generated installer/uninstaller scripts.
 ;
 ; Two jobs here:
-;   1. Refuse to install into a folder that holds reminder data. This is the one
-;      way an update can destroy reminders, and it is not hypothetical — see the
+;   1. Never install into a folder that holds reminder data. This is the one way
+;      an update can destroy reminders, and it is not hypothetical — see the
 ;      comment on customInit below.
 ;   2. Confirm before updating an existing install, and say plainly that the
 ;      user's data is not touched.
 
-; Shared message for the "that folder holds your reminders" refusal.
-!define REMINDERS_DATA_DIR_MSG "This folder holds your reminders (reminders.json).$\r$\n$\r$\nReminders cannot be installed here. Installing replaces everything in the program folder, which would delete them.$\r$\n$\r$\nChoose an empty folder, or accept the default location. Your reminders folder is chosen separately, inside the app."
+; Shown only when there is genuinely nowhere safe left to install to. Every
+; other case is recoverable and must not stop setup — see customInit.
+!define REMINDERS_DATA_DIR_MSG "Your reminders (reminders.json) are in the folder Reminders is installed in, and also in the default install location.$\r$\n$\r$\nInstalling replaces everything in the program folder, which would delete them, so setup cannot continue.$\r$\n$\r$\nOpen Reminders, move your reminders to a folder of their own with Settings > Data folder > Change, then run setup again."
 
 !macro customHeader
+  ; Remembers the folder customInit refused, so the message can name it. Only
+  ; for the installer pass: customHeader is compiled into the uninstaller too,
+  ; customInit is not, and an unreferenced Var there is a warning — which
+  ; electron-builder compiles with -WX.
+  !ifndef BUILD_UNINSTALLER
+    Var reminders_old_instdir
+  !endif
+
   ; Blocks the Next button on the directory page when the chosen folder holds
   ; reminder data. Covers a fresh install where the user browses to their own
   ; data folder — at that point .onInit has long since run.
@@ -33,15 +42,44 @@
   ; That inherited path is the dangerous case. If an earlier version was once
   ; installed into a folder the user later also picked for their data, every
   ; subsequent update silently wipes it: the uninstaller electron-builder runs
-  ; during an update does an unconditional RMDir /r $INSTDIR. Refuse instead —
-  ; a failed install is recoverable, a deleted reminders.json is not.
+  ; during an update does an unconditional RMDir /r $INSTDIR.
   IfFileExists "$INSTDIR\reminders.json" 0 reminders_dir_ok
-    IfSilent reminders_dir_stop
-    MessageBox MB_OK|MB_ICONSTOP "${REMINDERS_DATA_DIR_MSG}"
-    reminders_dir_stop:
-    ; Quit, not Abort: this runs inside .onInit, where Abort leaves the
-    ; half-initialised installer to unwind and crash instead of exiting.
-    Quit
+
+    ; A silent run can neither ask nor let the user retarget the install, so
+    ; stopping is the only safe answer. Quit, not Abort: Abort inside .onInit
+    ; leaves the half-initialised installer to unwind and crash instead of
+    ; exiting.
+    IfSilent 0 reminders_dir_retarget
+      Quit
+
+    reminders_dir_retarget:
+    ; Interactive: retarget, do NOT quit. Quitting here is what v1.3.1/v1.3.2
+    ; did, and it dead-ended every machine whose previous install folder is also
+    ; its data folder: $INSTDIR comes from the registry, so the refusal fired
+    ; before any directory page and no choice of folder — including the folder
+    ; setup itself was started from — could get past it.
+    ;
+    ; Sending the install to the default location is safe and keeps the data:
+    ; the old folder is left untouched, and the new version still finds the
+    ; reminders because the data folder is remembered in config.json under
+    ; %APPDATA%, not in the program folder.
+    StrCpy $reminders_old_instdir $INSTDIR
+    ; electron-builder resolves this through FOLDERID_UserProgramFiles and falls
+    ; back to the same literal; on a machine where those differ the user can
+    ; still correct it on the directory page.
+    StrCpy $INSTDIR "$LOCALAPPDATA\Programs\${APP_FILENAME}"
+
+    ; If the default holds reminders too, there is no safe folder left to
+    ; preselect. The directory page is skipped for an updater-driven run
+    ; (--updated), so falling through could still wipe data — stop instead.
+    IfFileExists "$INSTDIR\reminders.json" 0 reminders_dir_retargeted
+      MessageBox MB_OK|MB_ICONSTOP "${REMINDERS_DATA_DIR_MSG}"
+      Quit
+
+    reminders_dir_retargeted:
+    MessageBox MB_OK|MB_ICONEXCLAMATION \
+      "The folder Reminders is installed in also holds your reminders (reminders.json):$\r$\n$\r$\n$reminders_old_instdir$\r$\n$\r$\nInstalling there would replace everything in it and delete them, so this install has been pointed at:$\r$\n$\r$\n$INSTDIR$\r$\n$\r$\nThe old folder is left untouched and your reminders stay where they are — the new version will still find them. You can confirm or change the install folder on the next page."
+
   reminders_dir_ok:
 
   ; Never prompt during a silent / auto-update run (e.g. a background updater
